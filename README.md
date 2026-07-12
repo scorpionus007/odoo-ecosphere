@@ -49,6 +49,26 @@ Open **http://localhost:3000**.
 - **Notifications** — in-app alerts for compliance issues, approval decisions,
   policy reminders and badge unlocks (configurable in Settings)
 
+## Verified business rules
+
+Every §8 core rule from the problem statement is enforced and was tested end-to-end:
+
+- ✅ **Auto Emission Calculation** — recording a 100 L diesel fleet operation auto-creates a 268 kg CO₂e carbon transaction (100 × 2.68 factor)
+- ✅ **Evidence Requirement** — the Approve button on the Approvals queue is disabled for any CSR/challenge submission without an attached proof file while the toggle is ON
+- ✅ **Badge Auto-Award** — crossing an XP threshold instantly grants the badge (e.g. 260 XP unlocked "Eco Warrior" at the 250-XP rule) and fires a notification
+- ✅ **Reward Redemption** — deducts points (200 → 120 on an 80-pt reward), decrements stock, records the redemption, blocks unaffordable/out-of-stock items
+- ✅ **Compliance Issue Ownership** — owner + due date are mandatory; overdue open issues are highlighted and can notify owners in bulk
+- ✅ **Notification System** — approval decisions, badge unlocks, policy reminders and compliance issues, each channel toggleable in Settings
+
+## 3-minute demo script
+
+1. Sign in as **admin** → ESG Dashboard: overall weighted score, department rankings, emission trends
+2. Environmental → Operations: record a Fleet operation with the Diesel factor → watch the CO₂e appear automatically
+3. Sign in as **priya** (employee): join a CSR activity, attach a proof photo, redeem a reward with earned points
+4. Sign in as **manager**: Approvals queue → approve Priya's participation → her XP jumps and a badge auto-awards
+5. Reports → Custom builder: filter by department + date range → export the same report as PDF, Excel and CSV
+6. Settings: flip the three business-rule toggles and the E/S/G weights live
+
 ## Stack
 
 Next.js (App Router) · TypeScript · PostgreSQL · Prisma · Tailwind CSS · Recharts
