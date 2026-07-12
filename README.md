@@ -41,9 +41,13 @@ Open **http://localhost:3000**.
   diversity metrics, training completion
 - **Governance** — ESG policies + acknowledgements, audits, compliance issues
   with mandatory owner/due date and overdue flagging
-- **Gamification** — challenge lifecycle (Draft → Active → Under Review →
-  Completed / Archived), XP, auto-awarded badges, reward redemption with stock,
-  leaderboards
+- **EcoQuest World** — gamification lives inside a playable eco-village: your
+  character walks between stations (Village Hall, Bike Dock, Solar Farm,
+  Recycle Hub, Trading Post, Hall of Fame) to accept quests, log progress,
+  submit proof, redeem rewards and view the leaderboard. XP levels, animated
+  HUD, badge auto-awards, and a village "air quality" that mirrors the live
+  organization ESG score. Managers run the challenge lifecycle (Draft → Active
+  → Under Review → Completed / Archived) from the Quest Studio.
 - **Scoring** — department E/S/G scores rolled into a configurable weighted
   overall ESG score (default 40/30/30)
 - **Reports** — Environmental / Social / Governance / ESG Summary + custom
@@ -66,8 +70,8 @@ Every §8 core rule from the problem statement is enforced and was tested end-to
 
 1. Sign in as **admin** → ESG Dashboard: overall weighted score, department rankings, emission trends
 2. Environmental → Operations: record a Fleet operation with the Diesel factor → watch the CO₂e appear automatically
-3. Sign in as **priya** (employee): join a CSR activity, attach a proof photo, redeem a reward with earned points
-4. Sign in as **manager**: Approvals queue → approve Priya's participation → her XP jumps and a badge auto-awards
+3. Sign in as **priya** (employee): open **EcoQuest World** — walk your character to the Village Hall to join a CSR event, attach a proof photo, then walk to the Trading Post and buy a reward with earned coins
+4. Sign in as **manager**: Approvals queue → approve Priya's participation → her XP jumps, the HUD levels up and a badge auto-awards
 5. Reports → Custom builder: filter by department + date range → export the same report as PDF, Excel and CSV
 6. Settings: flip the three business-rule toggles and the E/S/G weights live
 

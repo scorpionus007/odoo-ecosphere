@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Leaf, Factory, Target, FlaskConical, Package, HeartHandshake,
   Users, GraduationCap, Scale, FileCheck2, ShieldAlert, ClipboardCheck, Trophy,
-  Medal, Gift, Crown, FileBarChart2, Settings, Menu, X, Globe2,
+  Gamepad2, FileBarChart2, Settings, Menu, X, Globe2,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -17,6 +17,7 @@ const NAV: Group[] = [
     title: "Overview",
     items: [
       { href: "/dashboard", label: "ESG Dashboard", icon: <LayoutDashboard size={16} /> },
+      { href: "/quest", label: "EcoQuest World", icon: <Gamepad2 size={16} /> },
       { href: "/reports", label: "Reports", icon: <FileBarChart2 size={16} /> },
     ],
   },
@@ -48,18 +49,10 @@ const NAV: Group[] = [
     ],
   },
   {
-    title: "Gamification",
-    items: [
-      { href: "/gamification/challenges", label: "Challenges", icon: <Trophy size={16} /> },
-      { href: "/gamification/badges", label: "Badges", icon: <Medal size={16} /> },
-      { href: "/gamification/rewards", label: "Rewards", icon: <Gift size={16} /> },
-      { href: "/gamification/leaderboard", label: "Leaderboard", icon: <Crown size={16} /> },
-    ],
-  },
-  {
     title: "Administration",
     items: [
       { href: "/approvals", label: "Approvals", icon: <ClipboardCheck size={16} />, roles: ["ADMIN", "MANAGER"] },
+      { href: "/gamification/challenges", label: "Quest Studio", icon: <Trophy size={16} />, roles: ["ADMIN", "MANAGER"] },
       { href: "/settings", label: "Settings", icon: <Settings size={16} />, roles: ["ADMIN"] },
     ],
   },

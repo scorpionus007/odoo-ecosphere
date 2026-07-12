@@ -6,7 +6,8 @@ import ThemeToggle from "@/components/ThemeToggle";
 import NotificationsBell from "@/components/NotificationsBell";
 import { currentUser, destroySession, getSession } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { LogOut, Sparkles } from "lucide-react";
+import { LogOut, Sparkles, Gamepad2 } from "lucide-react";
+import { levelFromXp, levelProgress } from "@/lib/game";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -47,12 +48,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <span className="capitalize">{user.role.toLowerCase()}</span>
           </div>
           <div className="flex items-center gap-2 ml-auto">
-            <div
-              className="hidden sm:flex items-center gap-1.5 rounded-full bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 px-3 py-1 text-xs font-semibold"
-              title="Redeemable points balance"
+            <Link
+              href="/quest"
+              className="hidden sm:flex items-center gap-2 rounded-full bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 px-3 py-1 text-xs font-semibold hover:ring-2 hover:ring-violet-400/50 transition-shadow"
+              title={`Level ${levelFromXp(user.xpTotal)} · ${user.xpTotal} XP · ${user.pointsBalance} points — enter EcoQuest World`}
             >
-              <Sparkles size={12} /> {user.pointsBalance} pts
-            </div>
+              <Gamepad2 size={13} />
+              <span>Lv {levelFromXp(user.xpTotal)}</span>
+              <span className="h-1.5 w-14 rounded-full bg-violet-200 dark:bg-violet-900 overflow-hidden">
+                <span
+                  className="block h-full rounded-full bg-violet-500"
+                  style={{ width: `${levelProgress(user.xpTotal)}%` }}
+                />
+              </span>
+              <Sparkles size={12} /> {user.pointsBalance}
+            </Link>
             <NotificationsBell
               items={notifications.map((n) => ({
                 id: n.id,
