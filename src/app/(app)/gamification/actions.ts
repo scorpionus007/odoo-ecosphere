@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireRole, requireUser } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { awardPoints, runBadgeEngine } from "@/lib/gamify";
+import { assertCanManageEmployee } from "@/lib/scope";
 
 // ---------- Challenges (lifecycle: DRAFT → ACTIVE → UNDER_REVIEW → COMPLETED / ARCHIVED) ----------
 
@@ -71,7 +72,7 @@ export async function attachChallengeProof(formData: FormData) {
 }
 
 export async function decideChallengeParticipation(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const id = String(formData.get("id"));
   const decision = String(formData.get("decision"));
   const p = await db.challengeParticipation.findUnique({
@@ -79,6 +80,7 @@ export async function decideChallengeParticipation(formData: FormData) {
     include: { challenge: true },
   });
   if (!p || p.approvalStatus !== "PENDING") return;
+  await assertCanManageEmployee(actor, p.employeeId); // managers decide only for their department
 
   if (decision === "APPROVED") {
     if (p.challenge.evidenceRequired && !p.proofUrl) {
@@ -138,11 +140,14 @@ export async function createReward(formData: FormData) {
   await requireRole("ADMIN");
   const name = String(formData.get("name") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
+  const type = String(formData.get("type") ?? "MERCH");
+  const brand = String(formData.get("brand") ?? "") || null;
   const pointsRequired = Number(formData.get("pointsRequired") ?? 100);
   const stock = Number(formData.get("stock") ?? 10);
   if (!name) return;
-  await db.reward.create({ data: { name, description, pointsRequired, stock } });
+  await db.reward.create({ data: { name, description, type, brand, pointsRequired, stock } });
   revalidatePath("/gamification/rewards");
+  revalidatePath("/quest");
 }
 
 export async function redeemReward(formData: FormData) {
@@ -156,6 +161,12 @@ export async function redeemReward(formData: FormData) {
   if (reward.status !== "ACTIVE" || reward.stock <= 0) return;
   if (me.pointsBalance < reward.pointsRequired) return;
 
+  // gift cards get an instantly claimable voucher code
+  const voucherCode =
+    reward.type === "GIFT_CARD"
+      ? `${(reward.brand ?? "ECO").slice(0, 4).toUpperCase()}-${crypto.randomUUID().replaceAll("-", "").slice(0, 4).toUpperCase()}-${crypto.randomUUID().replaceAll("-", "").slice(0, 4).toUpperCase()}`
+      : null;
+
   await db.$transaction([
     db.reward.update({ where: { id: rewardId }, data: { stock: { decrement: 1 } } }),
     db.user.update({
@@ -163,16 +174,19 @@ export async function redeemReward(formData: FormData) {
       data: { pointsBalance: { decrement: reward.pointsRequired } },
     }),
     db.rewardRedemption.create({
-      data: { rewardId, userId: user.id, pointsSpent: reward.pointsRequired },
+      data: { rewardId, userId: user.id, pointsSpent: reward.pointsRequired, voucherCode },
     }),
   ]);
   await notify(
     user.id,
     "GENERAL",
     `Reward redeemed: ${reward.name}`,
-    `${reward.pointsRequired} points deducted from your balance.`,
-    "/gamification/rewards"
+    voucherCode
+      ? `Your claim code: ${voucherCode} — also saved under My Redemptions.`
+      : `${reward.pointsRequired} points deducted from your balance.`,
+    "/quest"
   );
+  revalidatePath("/quest");
   revalidatePath("/gamification/rewards");
   revalidatePath("/", "layout");
 }

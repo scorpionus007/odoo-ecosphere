@@ -136,6 +136,8 @@ model Reward {
   id             String @id @default(cuid())
   name           String
   description    String
+  type           String @default("MERCH") // GIFT_CARD | PERK | MERCH | DONATION
+  brand          String? // e.g. Amazon, Starbucks (gift cards)
   pointsRequired Int
   stock          Int
   status         String @default("ACTIVE")
@@ -270,6 +272,7 @@ model RewardRedemption {
   userId      String
   user        User     @relation(fields: [userId], references: [id])
   pointsSpent Int
+  voucherCode String? // generated claim code for gift cards
   status      String   @default("FULFILLED")
   redeemedAt  DateTime @default(now())
 }

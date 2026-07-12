@@ -42,6 +42,19 @@ export default async function RewardsPage() {
                 <input name="description" required className={inputCls} />
               </Field>
               <div className="grid grid-cols-2 gap-3">
+                <Field label="Type">
+                  <select name="type" className={inputCls} defaultValue="MERCH">
+                    <option value="GIFT_CARD">Gift card (claim code)</option>
+                    <option value="PERK">Perk</option>
+                    <option value="MERCH">Merch</option>
+                    <option value="DONATION">Donation</option>
+                  </select>
+                </Field>
+                <Field label="Brand (gift cards)">
+                  <input name="brand" placeholder="Amazon / Starbucks…" className={inputCls} />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <Field label="Points required">
                   <input name="pointsRequired" type="number" min="1" defaultValue={100} className={inputCls} />
                 </Field>
@@ -105,6 +118,7 @@ export default async function RewardsPage() {
               <>
                 <Th>Reward</Th>
                 <Th>Points spent</Th>
+                <Th>Claim code</Th>
                 <Th>Status</Th>
                 <Th>Date</Th>
               </>
@@ -114,6 +128,15 @@ export default async function RewardsPage() {
               <tr key={r.id}>
                 <Td className="font-medium">{r.reward.name}</Td>
                 <Td>{r.pointsSpent}</Td>
+                <Td>
+                  {r.voucherCode ? (
+                    <span className="font-mono text-xs bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 rounded px-2 py-0.5">
+                      {r.voucherCode}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </Td>
                 <Td>
                   <Chip label={r.status} />
                 </Td>

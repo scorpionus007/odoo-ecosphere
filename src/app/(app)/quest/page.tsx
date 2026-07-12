@@ -1,10 +1,11 @@
 import { db } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { computeScores } from "@/lib/scoring";
 import { stationForCategory } from "@/lib/game";
-import QuestWorld, {
-  QuestChallenge, QuestActivity, QuestReward, QuestHero, QuestLeader,
-} from "@/components/quest/QuestWorld";
+import QuestWorld3D from "@/components/quest/QuestWorld3D";
+import type {
+  QuestChallenge, QuestActivity, QuestReward, QuestHero, QuestLeader, QuestRedemption,
+} from "@/components/quest/QuestWorld3D";
 import {
   joinChallenge, updateChallengeProgress, attachChallengeProof, redeemReward,
 } from "../gamification/actions";
@@ -14,9 +15,10 @@ import { PageHeader } from "@/components/ui";
 export const dynamic = "force-dynamic";
 
 export default async function QuestPage() {
-  const session = await requireUser();
+  const scope = await getScope();
+  const session = scope.user;
 
-  const [me, challenges, activities, rewards, leaders, scores] = await Promise.all([
+  const [me, challenges, activities, rewards, leaders, scores, redemptions] = await Promise.all([
     db.user.findUnique({
       where: { id: session.id },
       include: { badges: { include: { badge: true } } },
@@ -33,13 +35,25 @@ export default async function QuestPage() {
     }),
     db.reward.findMany({ where: { status: "ACTIVE" }, orderBy: { pointsRequired: "asc" } }),
     db.user.findMany({
-      where: { status: "ACTIVE" },
+      // Hall of Fame is department-scoped for non-admins
+      where: { status: "ACTIVE", ...(scope.departmentId ? { departmentId: scope.departmentId } : {}) },
       include: { badges: { include: { badge: true } } },
       orderBy: { xpTotal: "desc" },
       take: 8,
     }),
     computeScores(),
+    db.rewardRedemption.findMany({
+      where: { userId: session.id },
+      include: { reward: true },
+      orderBy: { redeemedAt: "desc" },
+      take: 20,
+    }),
   ]);
+
+  // village air quality: org score for admins, own-department score otherwise
+  const airScore = scope.isAdmin
+    ? scores.overall
+    : scores.departments.find((d) => d.departmentId === scope.departmentId)?.totalScore ?? scores.overall;
 
   const hero: QuestHero = {
     name: me?.name ?? "Hero",
@@ -96,6 +110,8 @@ export default async function QuestPage() {
     id: r.id,
     name: r.name,
     description: r.description,
+    type: r.type,
+    brand: r.brand,
     pointsRequired: r.pointsRequired,
     stock: r.stock,
   }));
@@ -107,19 +123,32 @@ export default async function QuestPage() {
     isMe: u.id === session.id,
   }));
 
+  const questRedemptions: QuestRedemption[] = redemptions.map((r) => ({
+    id: r.id,
+    rewardName: r.reward.name,
+    type: r.reward.type,
+    pointsSpent: r.pointsSpent,
+    voucherCode: r.voucherCode,
+    redeemedAt: r.redeemedAt.toISOString(),
+  }));
+
   return (
     <>
       <PageHeader
         title="EcoQuest World"
-        subtitle="Walk your hero around the eco-village — accept quests, submit proof, earn XP, unlock badges and spend points at the Trading Post"
+        subtitle={`Walk your hero around the eco-village — accept quests, earn XP, unlock badges and claim gift cards at the Trading Post${
+          scope.isAdmin ? "" : ` · Hall of Fame shows ${scope.departmentName ?? "your department"}`
+        }`}
       />
-      <QuestWorld
+      <QuestWorld3D
         hero={hero}
         challenges={questChallenges}
         activities={questActivities}
         rewards={questRewards}
         leaders={questLeaders}
-        orgScore={scores.overall}
+        redemptions={questRedemptions}
+        orgScore={airScore}
+        airLabel={scope.isAdmin ? "Organization ESG" : `${scope.departmentName ?? "Department"} ESG`}
         actions={{
           joinChallenge,
           updateChallengeProgress,
@@ -129,10 +158,6 @@ export default async function QuestPage() {
           redeemReward,
         }}
       />
-      <p className="text-xs text-slate-400 mt-3">
-        Click any building to walk there. ❗ = new quests · ⏳ = awaiting approval · ✅ = completed · 🪙 = you can afford
-        something at the shop. Village air quality mirrors the organization&apos;s live ESG score.
-      </p>
     </>
   );
 }
