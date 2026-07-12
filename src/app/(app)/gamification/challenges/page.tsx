@@ -19,26 +19,34 @@ const NEXT_STATUS: Record<string, string[]> = {
 
 export default async function ChallengesPage() {
   const user = await requireUser();
-  const canManage = user.role === "ADMIN" || user.role === "MANAGER";
-  const [challenges, categories] = await Promise.all([
+  const isAdmin = user.role === "ADMIN";
+  const canManage = isAdmin || user.role === "MANAGER";
+  const [challenges, categories, departments] = await Promise.all([
     db.challenge.findMany({
-      include: { category: true, participations: { include: { employee: true } } },
+      // admin: everything; others: org-wide + their department's quests
+      where: isAdmin ? {} : { OR: [{ departmentId: null }, { departmentId: user.departmentId }] },
+      include: { category: true, department: true, participations: { include: { employee: true } } },
       orderBy: [{ status: "asc" }, { deadline: "asc" }],
     }),
     db.category.findMany({ where: { type: "CHALLENGE", status: "ACTIVE" } }),
+    db.department.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } }),
   ]);
 
   const visible = canManage ? challenges : challenges.filter((c) => c.status !== "DRAFT");
+  // managers run the lifecycle only for quests they own (their department's)
+  const canMove = (c: (typeof challenges)[number]) => isAdmin || c.departmentId === user.departmentId;
 
   return (
     <>
       <PageHeader
-        title="Sustainability Challenges"
-        subtitle="Lifecycle: Draft → Active → Under Review → Completed (or Archived at any point)"
+        title="Quest Studio"
+        subtitle={`Lifecycle: Draft → Active → Under Review → Completed (or Archived at any point)${
+          isAdmin ? " — you assign org-wide or per-department quests" : " — your quests are assigned to your team"
+        }`}
       />
       <div className="grid lg:grid-cols-3 gap-4">
         {canManage && (
-          <Card title="Create challenge (starts as Draft)">
+          <Card title="Create quest (starts as Draft)">
             <form action={createChallenge} className="space-y-3">
               <Field label="Title">
                 <input name="title" required className={inputCls} />
@@ -46,6 +54,20 @@ export default async function ChallengesPage() {
               <Field label="Description">
                 <textarea name="description" rows={2} required className={inputCls} />
               </Field>
+              {isAdmin ? (
+                <Field label="Assign to">
+                  <select name="departmentId" className={inputCls} defaultValue="">
+                    <option value="">Organization-wide (everyone)</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} only
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : (
+                <p className="text-xs text-slate-400 -mt-1">Assigned to your team automatically.</p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Category">
                   <select name="categoryId" required className={inputCls}>
@@ -98,8 +120,9 @@ export default async function ChallengesPage() {
                         <Zap size={12} /> {c.xp} XP
                       </span>
                     </div>
-                    <div className="text-xs text-slate-400 flex items-center gap-3 mt-1">
+                    <div className="text-xs text-slate-400 flex items-center gap-3 mt-1 flex-wrap">
                       <Chip label={c.category.name} tone="blue" />
+                      <Chip label={c.department ? `${c.department.name} team` : "Org-wide"} tone={c.department ? "violet" : "green"} />
                       <span className="inline-flex items-center gap-1">
                         <CalendarDays size={12} /> due {c.deadline.toLocaleDateString()}
                       </span>
@@ -109,13 +132,13 @@ export default async function ChallengesPage() {
                   </div>
 
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    {c.status === "ACTIVE" && !mine && (
+                    {c.status === "ACTIVE" && !mine && !isAdmin && (
                       <form action={joinChallenge}>
                         <input type="hidden" name="challengeId" value={c.id} />
                         <button className={btnPrimary}>Join challenge</button>
                       </form>
                     )}
-                    {canManage && NEXT_STATUS[c.status].length > 0 && (
+                    {canManage && canMove(c) && NEXT_STATUS[c.status].length > 0 && (
                       <form action={setChallengeStatus} className="flex gap-1.5">
                         <input type="hidden" name="id" value={c.id} />
                         <select name="status" className={`${inputCls} !w-auto !py-1 text-xs`}>

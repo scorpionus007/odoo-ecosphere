@@ -17,7 +17,7 @@ const NAV: Group[] = [
     title: "Overview",
     items: [
       { href: "/dashboard", label: "ESG Dashboard", icon: <LayoutDashboard size={16} /> },
-      { href: "/quest", label: "EcoQuest World", icon: <Gamepad2 size={16} /> },
+      { href: "/quest", label: "EcoQuest World", icon: <Gamepad2 size={16} />, roles: ["MANAGER", "EMPLOYEE"] },
       { href: "/reports", label: "Reports", icon: <FileBarChart2 size={16} /> },
     ],
   },

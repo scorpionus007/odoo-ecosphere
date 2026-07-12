@@ -12,8 +12,11 @@ export default async function ApprovalsPage() {
   await requireRole("ADMIN", "MANAGER");
   const scope = await getScope();
   const settings = await getSettings();
-  // managers only review submissions from their own department
-  const deptFilter = scope.departmentId ? { employee: { departmentId: scope.departmentId } } : {};
+  // managers review only their own department's EMPLOYEE submissions;
+  // manager submissions are reviewed by admins
+  const deptFilter = scope.departmentId
+    ? { employee: { departmentId: scope.departmentId, role: "EMPLOYEE" } }
+    : {};
   const [csrPending, challengePending] = await Promise.all([
     db.employeeParticipation.findMany({
       where: { approvalStatus: "PENDING", ...deptFilter },

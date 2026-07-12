@@ -134,6 +134,10 @@ export async function decideParticipation(formData: FormData) {
   });
   if (!p || p.approvalStatus !== "PENDING") return;
   await assertCanManageEmployee(actor, p.employeeId); // managers decide only for their department
+  // managers' own submissions are approved by ADMIN only
+  if (p.employee.role !== "EMPLOYEE" && actor.role !== "ADMIN") {
+    throw new Error("Manager submissions are approved by an admin");
+  }
 
   // Evidence Requirement toggle: cannot approve without proof
   const settings = await getSettings();

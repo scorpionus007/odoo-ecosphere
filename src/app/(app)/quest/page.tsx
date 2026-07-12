@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { computeScores } from "@/lib/scoring";
@@ -17,6 +18,8 @@ export const dynamic = "force-dynamic";
 export default async function QuestPage() {
   const scope = await getScope();
   const session = scope.user;
+  // admins curate quests from the Quest Studio — the world is for players
+  if (scope.isAdmin) redirect("/gamification/challenges");
 
   const [me, challenges, activities, rewards, leaders, scores, redemptions] = await Promise.all([
     db.user.findUnique({
@@ -24,7 +27,11 @@ export default async function QuestPage() {
       include: { badges: { include: { badge: true } } },
     }),
     db.challenge.findMany({
-      where: { status: "ACTIVE" },
+      where: {
+        status: "ACTIVE",
+        // org-wide quests (admin) + quests assigned to your department (manager)
+        OR: [{ departmentId: null }, { departmentId: session.departmentId }],
+      },
       include: { category: true, participations: { where: { employeeId: session.id } } },
       orderBy: { deadline: "asc" },
     }),

@@ -59,6 +59,7 @@ model Department {
   policies           EsgPolicy[]
   complianceAssignments ComplianceAssignment[]
   grievances         Grievance[]
+  challenges         Challenge[]
 }
 
 // ============ MASTER DATA ============
@@ -242,6 +243,8 @@ model Challenge {
   description      String
   categoryId       String
   category         Category @relation(fields: [categoryId], references: [id])
+  departmentId     String? // null = org-wide (admin); set = assigned to that department (manager)
+  department       Department? @relation(fields: [departmentId], references: [id])
   xp               Int
   difficulty       String   @default("MEDIUM") // EASY | MEDIUM | HARD
   evidenceRequired Boolean  @default(true)

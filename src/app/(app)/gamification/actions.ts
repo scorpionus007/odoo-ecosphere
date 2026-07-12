@@ -13,7 +13,7 @@ import { verifyEvidence } from "@/lib/ai";
 const LIFECYCLE = ["DRAFT", "ACTIVE", "UNDER_REVIEW", "COMPLETED", "ARCHIVED"];
 
 export async function createChallenge(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const categoryId = String(formData.get("categoryId") ?? "");
@@ -21,29 +21,43 @@ export async function createChallenge(formData: FormData) {
   const difficulty = String(formData.get("difficulty") ?? "MEDIUM");
   const evidenceRequired = formData.get("evidenceRequired") === "on";
   const deadline = new Date(String(formData.get("deadline")));
+  // admin assigns org-wide (or picks a department); managers assign to their own team only
+  const departmentId =
+    actor.role === "ADMIN"
+      ? String(formData.get("departmentId") ?? "") || null
+      : actor.departmentId;
   if (!title || !categoryId || isNaN(deadline.getTime())) return;
   await db.challenge.create({
-    data: { title, description, categoryId, xp, difficulty, evidenceRequired, deadline },
+    data: { title, description, categoryId, departmentId, xp, difficulty, evidenceRequired, deadline },
   });
   revalidatePath("/gamification/challenges");
+  revalidatePath("/quest");
 }
 
 export async function setChallengeStatus(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const id = String(formData.get("id"));
   const status = String(formData.get("status"));
   if (!LIFECYCLE.includes(status)) return;
+  const ch = await db.challenge.findUnique({ where: { id } });
+  if (!ch) return;
+  // managers run the lifecycle only for their own team's quests
+  if (actor.role === "MANAGER" && ch.departmentId !== actor.departmentId) return;
   await db.challenge.update({ where: { id }, data: { status } });
   revalidatePath("/gamification/challenges");
+  revalidatePath("/quest");
 }
 
 // ---------- Challenge participation ----------
 
 export async function joinChallenge(formData: FormData) {
   const user = await requireUser();
+  if (user.role === "ADMIN") return; // admins curate quests, they don't play
   const challengeId = String(formData.get("challengeId"));
   const ch = await db.challenge.findUnique({ where: { id: challengeId } });
   if (!ch || ch.status !== "ACTIVE") return;
+  // quests are joinable if org-wide or assigned to your department
+  if (ch.departmentId && ch.departmentId !== user.departmentId) return;
   const exists = await db.challengeParticipation.findUnique({
     where: { challengeId_employeeId: { challengeId, employeeId: user.id } },
   });
@@ -96,10 +110,14 @@ export async function decideChallengeParticipation(formData: FormData) {
   const decision = String(formData.get("decision"));
   const p = await db.challengeParticipation.findUnique({
     where: { id },
-    include: { challenge: true },
+    include: { challenge: true, employee: true },
   });
   if (!p || p.approvalStatus !== "PENDING") return;
   await assertCanManageEmployee(actor, p.employeeId); // managers decide only for their department
+  // managers' own submissions are approved by ADMIN only
+  if (p.employee.role !== "EMPLOYEE" && actor.role !== "ADMIN") {
+    throw new Error("Manager submissions are approved by an admin");
+  }
 
   if (decision === "APPROVED") {
     if (p.challenge.evidenceRequired && !p.proofUrl) {

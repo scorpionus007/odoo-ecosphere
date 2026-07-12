@@ -65,11 +65,13 @@ const S3D: Station3D[] = STATION_META.map((m, i) => {
   return { ...m, angle, x: Math.sin(angle) * RING_R, z: Math.cos(angle) * RING_R };
 });
 
-const WALK_SPEED = 4.4;
-const RUN_SPEED = 7.4;
-const TURN_SPEED = 2.7; // rad/s
-const JUMP_V = 5.4;
-const GRAVITY = 14.5;
+const WALK_SPEED = 4.0;
+const RUN_SPEED = 6.8;
+const TURN_SPEED = 2.4; // rad/s
+const ACCEL = 7; // how quickly speed eases toward target (higher = snappier)
+const TURN_ACCEL = 11;
+const JUMP_V = 4.6;
+const GRAVITY = 11.5;
 const INTERACT_DIST = 3.6;
 const WORLD_R = 20; // roam bounds
 
@@ -77,6 +79,8 @@ type AvatarKind = "BOY" | "GIRL";
 
 type WorldStore = {
   x: number; z: number; y: number; yaw: number; vy: number;
+  speed: number; // smoothed forward velocity (negative = backing up)
+  turnVel: number; // smoothed angular velocity
   grounded: boolean; moving: boolean; running: boolean;
   clock: number; gait: number; // gait phase for limb swing
   keys: Set<string>;
@@ -92,18 +96,24 @@ function stepWorld(s: WorldStore, dt: number) {
     return;
   }
   const k = s.keys;
-  const fwd = k.has("ArrowUp") || k.has("KeyW") ? 1 : k.has("ArrowDown") || k.has("KeyS") ? -0.62 : 0;
+  const fwd = k.has("ArrowUp") || k.has("KeyW") ? 1 : k.has("ArrowDown") || k.has("KeyS") ? -0.55 : 0;
   const turn = (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0) - (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0);
   s.running = k.has("ShiftLeft") || k.has("ShiftRight");
 
-  s.yaw += turn * TURN_SPEED * dt;
+  // smoothed turning — eases in and out instead of snapping
+  s.turnVel += (turn * TURN_SPEED - s.turnVel) * Math.min(1, dt * TURN_ACCEL);
+  s.yaw += s.turnVel * dt;
 
-  const speed = (s.running ? RUN_SPEED : WALK_SPEED) * fwd;
-  s.moving = fwd !== 0;
-  if (s.moving) {
-    s.gait += dt * (s.running ? 13 : 9);
-    const nx = s.x + Math.sin(s.yaw) * speed * dt;
-    const nz = s.z + Math.cos(s.yaw) * speed * dt;
+  // smoothed velocity — accelerates and brakes like a real body
+  const targetSpeed = (s.running ? RUN_SPEED : WALK_SPEED) * fwd;
+  s.speed += (targetSpeed - s.speed) * Math.min(1, dt * ACCEL);
+  if (Math.abs(s.speed) < 0.04 && fwd === 0) s.speed = 0;
+  s.moving = Math.abs(s.speed) > 0.25;
+
+  if (s.speed !== 0) {
+    s.gait += dt * (3.2 + Math.abs(s.speed) * 1.55);
+    const nx = s.x + Math.sin(s.yaw) * s.speed * dt;
+    const nz = s.z + Math.cos(s.yaw) * s.speed * dt;
     const r = Math.hypot(nx, nz);
     let px = r > WORLD_R ? (nx / r) * WORLD_R : nx;
     let pz = r > WORLD_R ? (nz / r) * WORLD_R : nz;
@@ -111,15 +121,15 @@ function stepWorld(s: WorldStore, dt: number) {
       const dx = px - st.x;
       const dz = pz - st.z;
       const d = Math.hypot(dx, dz);
-      if (d < 2.1 && d > 0.001) {
-        px = st.x + (dx / d) * 2.1;
-        pz = st.z + (dz / d) * 2.1;
+      if (d < 2.3 && d > 0.001) {
+        px = st.x + (dx / d) * 2.3;
+        pz = st.z + (dz / d) * 2.3;
       }
     }
     s.x = px;
     s.z = pz;
   } else {
-    s.gait *= 0.9;
+    s.gait *= 0.85;
   }
 
   if (k.has("Space") && s.grounded) {
@@ -151,24 +161,30 @@ function nearestStation(s: WorldStore): Station3D | null {
   return near;
 }
 
-// ================= full-bodied avatar (boy / girl) =================
+// ================= full-bodied avatar (professional, articulated) =================
 function AvatarBody({
   store, kind, visible,
 }: {
   store: React.MutableRefObject<WorldStore>; kind: AvatarKind; visible: boolean;
 }) {
   const root = useRef<THREE.Group>(null);
+  const body = useRef<THREE.Group>(null);
   const armL = useRef<THREE.Group>(null);
   const armR = useRef<THREE.Group>(null);
+  const foreL = useRef<THREE.Group>(null);
+  const foreR = useRef<THREE.Group>(null);
   const legL = useRef<THREE.Group>(null);
   const legR = useRef<THREE.Group>(null);
-  const body = useRef<THREE.Group>(null);
+  const shinL = useRef<THREE.Group>(null);
+  const shinR = useRef<THREE.Group>(null);
 
-  const skin = "#fcd9b8";
-  const shirt = kind === "GIRL" ? "#0d9488" : "#16a34a";
-  const shirtLight = kind === "GIRL" ? "#14b8a6" : "#22c55e";
-  const pants = kind === "GIRL" ? "#7c3aed" : "#365314";
-  const hair = kind === "GIRL" ? "#7c2d12" : "#1f2937";
+  // business-casual palette
+  const skin = kind === "GIRL" ? "#eec39a" : "#e0ac69";
+  const shirt = kind === "GIRL" ? "#0f766e" : "#e8eef5"; // teal blouse / white dress shirt
+  const sleeves = shirt;
+  const bottoms = kind === "GIRL" ? "#334155" : "#1e3a5f"; // charcoal skirt+leggings / navy trousers
+  const shoes = kind === "GIRL" ? "#1f2937" : "#4a2c17";
+  const hair = kind === "GIRL" ? "#5b3a1e" : "#2b2018";
 
   useFrame(() => {
     const s = store.current;
@@ -176,128 +192,220 @@ function AvatarBody({
     root.current.visible = visible;
     root.current.position.set(s.x, s.y, s.z);
     root.current.rotation.y = s.yaw;
-    const swing = s.moving ? Math.sin(s.gait) * (s.running ? 0.95 : 0.65) : 0;
-    const idle = s.moving ? 0 : Math.sin(s.clock * 2) * 0.04;
-    if (armL.current) armL.current.rotation.x = swing;
-    if (armR.current) armR.current.rotation.x = -swing;
+
+    const intensity = Math.min(1, Math.abs(s.speed) / WALK_SPEED);
+    const swing = Math.sin(s.gait) * 0.55 * intensity;
+    const idleSway = intensity < 0.05 ? Math.sin(s.clock * 1.6) * 0.035 : 0;
+
+    // arms swing opposite to legs, elbows bend slightly on the back-swing
+    if (armL.current) armL.current.rotation.x = swing + idleSway;
+    if (armR.current) armR.current.rotation.x = -swing + idleSway;
+    if (foreL.current) foreL.current.rotation.x = -0.25 - Math.max(0, -Math.sin(s.gait)) * 0.5 * intensity;
+    if (foreR.current) foreR.current.rotation.x = -0.25 - Math.max(0, Math.sin(s.gait)) * 0.5 * intensity;
+    // legs with knee flexion for a natural gait
     if (legL.current) legL.current.rotation.x = -swing;
     if (legR.current) legR.current.rotation.x = swing;
-    if (body.current) body.current.position.y = (s.moving && s.grounded ? Math.abs(Math.sin(s.gait)) * 0.06 : idle);
-    // airborne pose
+    if (shinL.current) shinL.current.rotation.x = Math.max(0, Math.sin(s.gait)) * 0.7 * intensity;
+    if (shinR.current) shinR.current.rotation.x = Math.max(0, -Math.sin(s.gait)) * 0.7 * intensity;
+    if (body.current) {
+      body.current.position.y = s.grounded ? Math.abs(Math.sin(s.gait)) * 0.045 * intensity : 0;
+      body.current.rotation.x = intensity * 0.06; // slight forward lean while moving
+    }
+    // airborne: tucked jump pose
     if (!s.grounded) {
-      if (legL.current) legL.current.rotation.x = -0.5;
-      if (legR.current) legR.current.rotation.x = 0.35;
-      if (armL.current) armL.current.rotation.x = -2.4;
-      if (armR.current) armR.current.rotation.x = -2.4;
+      if (legL.current) legL.current.rotation.x = -0.55;
+      if (legR.current) legR.current.rotation.x = 0.25;
+      if (shinL.current) shinL.current.rotation.x = 0.9;
+      if (shinR.current) shinR.current.rotation.x = 0.5;
+      if (armL.current) armL.current.rotation.x = -0.6;
+      if (armR.current) armR.current.rotation.x = -0.6;
     }
   });
+
+  const Leg = ({ side, hipRef, shinRef }: { side: 1 | -1; hipRef: React.RefObject<THREE.Group | null>; shinRef: React.RefObject<THREE.Group | null> }) => (
+    <group ref={hipRef} position={[0.11 * side, 0.9, 0]}>
+      {/* thigh */}
+      <mesh position={[0, -0.21, 0]} castShadow>
+        <capsuleGeometry args={[0.093, 0.3, 6, 10]} />
+        <meshStandardMaterial color={bottoms} roughness={0.8} />
+      </mesh>
+      {/* shin pivots at the knee */}
+      <group ref={shinRef} position={[0, -0.42, 0]}>
+        <mesh position={[0, -0.19, 0]} castShadow>
+          <capsuleGeometry args={[0.078, 0.28, 6, 10]} />
+          <meshStandardMaterial color={kind === "GIRL" ? "#1e293b" : bottoms} roughness={0.8} />
+        </mesh>
+        {/* shoe */}
+        <mesh position={[0, -0.4, 0.055]} castShadow>
+          <boxGeometry args={[0.14, 0.09, 0.3]} />
+          <meshStandardMaterial color={shoes} roughness={0.45} />
+        </mesh>
+      </group>
+    </group>
+  );
+
+  const Arm = ({ side, shoulderRef, foreRef }: { side: 1 | -1; shoulderRef: React.RefObject<THREE.Group | null>; foreRef: React.RefObject<THREE.Group | null> }) => (
+    <group ref={shoulderRef} position={[0.3 * side, 1.46, 0]} rotation={[0, 0, -0.08 * side]}>
+      {/* upper arm */}
+      <mesh position={[0, -0.16, 0]} castShadow>
+        <capsuleGeometry args={[0.062, 0.22, 6, 10]} />
+        <meshStandardMaterial color={sleeves} roughness={0.75} />
+      </mesh>
+      {/* forearm pivots at the elbow */}
+      <group ref={foreRef} position={[0, -0.32, 0]} rotation={[-0.25, 0, 0]}>
+        <mesh position={[0, -0.13, 0]} castShadow>
+          <capsuleGeometry args={[0.055, 0.18, 6, 10]} />
+          <meshStandardMaterial color={sleeves} roughness={0.75} />
+        </mesh>
+        <mesh position={[0, -0.28, 0]} castShadow>
+          <sphereGeometry args={[0.07, 10, 10]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+      </group>
+    </group>
+  );
 
   return (
     <group ref={root}>
       <group ref={body}>
-        {/* legs (pivot at hips) */}
-        <group ref={legL} position={[0.12, 0.86, 0]}>
-          <mesh position={[0, -0.28, 0]} castShadow>
-            <capsuleGeometry args={[0.095, 0.4, 4, 8]} />
-            <meshStandardMaterial color={pants} />
-          </mesh>
-          {/* foot */}
-          <mesh position={[0, -0.56, 0.07]} castShadow>
-            <boxGeometry args={[0.16, 0.1, 0.3]} />
-            <meshStandardMaterial color="#78350f" />
-          </mesh>
-        </group>
-        <group ref={legR} position={[-0.12, 0.86, 0]}>
-          <mesh position={[0, -0.28, 0]} castShadow>
-            <capsuleGeometry args={[0.095, 0.4, 4, 8]} />
-            <meshStandardMaterial color={pants} />
-          </mesh>
-          <mesh position={[0, -0.56, 0.07]} castShadow>
-            <boxGeometry args={[0.16, 0.1, 0.3]} />
-            <meshStandardMaterial color="#78350f" />
-          </mesh>
-        </group>
-        {/* torso */}
-        <mesh position={[0, 1.18, 0]} castShadow>
-          <capsuleGeometry args={[0.27, 0.42, 8, 16]} />
-          <meshStandardMaterial color={shirt} />
-        </mesh>
-        <mesh position={[0, 1.34, 0]} castShadow>
-          <capsuleGeometry args={[0.275, 0.16, 8, 16]} />
-          <meshStandardMaterial color={shirtLight} />
-        </mesh>
-        {kind === "GIRL" && (
-          // skirt
-          <mesh position={[0, 0.92, 0]} castShadow>
-            <coneGeometry args={[0.34, 0.34, 14]} />
-            <meshStandardMaterial color={pants} />
-          </mesh>
-        )}
-        {/* arms (pivot at shoulders) */}
-        <group ref={armL} position={[0.34, 1.42, 0]}>
-          <mesh position={[0, -0.24, 0]} castShadow>
-            <capsuleGeometry args={[0.075, 0.36, 4, 8]} />
-            <meshStandardMaterial color={shirt} />
-          </mesh>
-          {/* hand */}
-          <mesh position={[0, -0.48, 0]} castShadow>
-            <sphereGeometry args={[0.085, 10, 10]} />
-            <meshStandardMaterial color={skin} />
-          </mesh>
-        </group>
-        <group ref={armR} position={[-0.34, 1.42, 0]}>
-          <mesh position={[0, -0.24, 0]} castShadow>
-            <capsuleGeometry args={[0.075, 0.36, 4, 8]} />
-            <meshStandardMaterial color={shirt} />
-          </mesh>
-          <mesh position={[0, -0.48, 0]} castShadow>
-            <sphereGeometry args={[0.085, 10, 10]} />
-            <meshStandardMaterial color={skin} />
-          </mesh>
-        </group>
-        {/* head */}
-        <mesh position={[0, 1.78, 0]} castShadow>
-          <sphereGeometry args={[0.24, 24, 24]} />
-          <meshStandardMaterial color={skin} />
-        </mesh>
-        {/* eyes */}
-        <mesh position={[0.09, 1.82, 0.2]}>
-          <sphereGeometry args={[0.032, 8, 8]} />
-          <meshStandardMaterial color="#1f2937" />
-        </mesh>
-        <mesh position={[-0.09, 1.82, 0.2]}>
-          <sphereGeometry args={[0.032, 8, 8]} />
-          <meshStandardMaterial color="#1f2937" />
-        </mesh>
-        {/* hair */}
-        {kind === "BOY" ? (
-          <mesh position={[0, 1.92, -0.02]} castShadow>
-            <sphereGeometry args={[0.235, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2.4]} />
-            <meshStandardMaterial color={hair} />
+        <Leg side={1} hipRef={legL} shinRef={shinL} />
+        <Leg side={-1} hipRef={legR} shinRef={shinR} />
+
+        {kind === "GIRL" ? (
+          // pencil skirt
+          <mesh position={[0, 0.98, 0]} castShadow>
+            <cylinderGeometry args={[0.2, 0.26, 0.34, 14]} />
+            <meshStandardMaterial color={bottoms} roughness={0.85} />
           </mesh>
         ) : (
+          // trouser waist
+          <mesh position={[0, 0.96, 0]} castShadow>
+            <cylinderGeometry args={[0.215, 0.23, 0.2, 14]} />
+            <meshStandardMaterial color={bottoms} roughness={0.85} />
+          </mesh>
+        )}
+
+        {/* torso: fitted shirt/blouse with subtle taper */}
+        <mesh position={[0, 1.26, 0]} castShadow>
+          <cylinderGeometry args={[0.24, 0.205, 0.5, 16]} />
+          <meshStandardMaterial color={shirt} roughness={0.7} />
+        </mesh>
+        {/* shoulders */}
+        <mesh position={[0, 1.5, 0]} castShadow>
+          <capsuleGeometry args={[0.235, 0.06, 8, 16]} />
+          <meshStandardMaterial color={shirt} roughness={0.7} />
+        </mesh>
+        {/* collar */}
+        <mesh position={[0, 1.56, 0.02]} rotation={[0.25, 0, 0]}>
+          <torusGeometry args={[0.105, 0.03, 8, 16]} />
+          <meshStandardMaterial color={kind === "GIRL" ? "#115e59" : "#cbd5e1"} roughness={0.6} />
+        </mesh>
+        {kind === "BOY" && (
+          // tie
           <group>
-            <mesh position={[0, 1.9, -0.03]} castShadow>
-              <sphereGeometry args={[0.245, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-              <meshStandardMaterial color={hair} />
+            <mesh position={[0, 1.42, 0.225]} rotation={[0.06, 0, 0]}>
+              <boxGeometry args={[0.075, 0.3, 0.02]} />
+              <meshStandardMaterial color="#166534" roughness={0.5} />
             </mesh>
-            {/* ponytail */}
-            <mesh position={[0, 1.78, -0.26]} rotation={[0.5, 0, 0]} castShadow>
-              <capsuleGeometry args={[0.07, 0.34, 4, 8]} />
-              <meshStandardMaterial color={hair} />
+            <mesh position={[0, 1.24, 0.21]} rotation={[0.06, 0, Math.PI / 4]}>
+              <boxGeometry args={[0.075, 0.075, 0.02]} />
+              <meshStandardMaterial color="#166534" roughness={0.5} />
             </mesh>
           </group>
         )}
-        {/* leaf badge */}
-        <mesh position={[0.16, 1.4, 0.24]} rotation={[0, 0, -0.5]}>
-          <sphereGeometry args={[0.05, 8, 8]} />
-          <meshStandardMaterial color="#a3e635" />
+        {/* company lanyard + badge */}
+        <mesh position={[0.07, 1.44, 0.23]} rotation={[0.06, 0, 0.35]}>
+          <boxGeometry args={[0.02, 0.24, 0.008]} />
+          <meshStandardMaterial color="#10b981" />
         </mesh>
+        <mesh position={[0.13, 1.32, 0.235]} rotation={[0.06, 0, 0]}>
+          <boxGeometry args={[0.09, 0.12, 0.012]} />
+          <meshStandardMaterial color="#f8fafc" roughness={0.4} />
+        </mesh>
+
+        <Arm side={1} shoulderRef={armL} foreRef={foreL} />
+        <Arm side={-1} shoulderRef={armR} foreRef={foreR} />
+
+        {/* neck */}
+        <mesh position={[0, 1.6, 0]} castShadow>
+          <cylinderGeometry args={[0.07, 0.08, 0.12, 10]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+        {/* head — slightly oval, human proportion */}
+        <mesh position={[0, 1.8, 0]} scale={[0.92, 1.05, 0.95]} castShadow>
+          <sphereGeometry args={[0.205, 24, 24]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+        {/* ears */}
+        {[1, -1].map((sd) => (
+          <mesh key={sd} position={[0.19 * sd, 1.8, 0]}>
+            <sphereGeometry args={[0.035, 8, 8]} />
+            <meshStandardMaterial color={skin} />
+          </mesh>
+        ))}
+        {/* eyes with whites */}
+        {[1, -1].map((sd) => (
+          <group key={sd}>
+            <mesh position={[0.075 * sd, 1.83, 0.17]}>
+              <sphereGeometry args={[0.032, 10, 10]} />
+              <meshStandardMaterial color="#ffffff" />
+            </mesh>
+            <mesh position={[0.075 * sd, 1.83, 0.195]}>
+              <sphereGeometry args={[0.016, 8, 8]} />
+              <meshStandardMaterial color="#2d2016" />
+            </mesh>
+            {/* eyebrow */}
+            <mesh position={[0.075 * sd, 1.89, 0.175]} rotation={[0.15, 0, 0.1 * sd]}>
+              <boxGeometry args={[0.055, 0.012, 0.015]} />
+              <meshStandardMaterial color={hair} />
+            </mesh>
+          </group>
+        ))}
+        {/* nose + mouth */}
+        <mesh position={[0, 1.78, 0.2]}>
+          <coneGeometry args={[0.022, 0.05, 8]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+        <mesh position={[0, 1.72, 0.185]} rotation={[0.3, 0, 0]}>
+          <boxGeometry args={[0.06, 0.012, 0.01]} />
+          <meshStandardMaterial color="#b26049" />
+        </mesh>
+        {/* hair */}
+        {kind === "BOY" ? (
+          <group>
+            <mesh position={[0, 1.9, -0.02]} scale={[0.95, 0.8, 0.98]} castShadow>
+              <sphereGeometry args={[0.215, 18, 14, 0, Math.PI * 2, 0, Math.PI / 2.1]} />
+              <meshStandardMaterial color={hair} roughness={0.9} />
+            </mesh>
+            {/* neat side part */}
+            <mesh position={[0, 1.87, -0.13]} rotation={[-0.5, 0, 0]}>
+              <boxGeometry args={[0.36, 0.12, 0.1]} />
+              <meshStandardMaterial color={hair} roughness={0.9} />
+            </mesh>
+          </group>
+        ) : (
+          <group>
+            <mesh position={[0, 1.87, -0.02]} scale={[1, 0.95, 1]} castShadow>
+              <sphereGeometry args={[0.225, 18, 14, 0, Math.PI * 2, 0, Math.PI / 1.9]} />
+              <meshStandardMaterial color={hair} roughness={0.95} />
+            </mesh>
+            {/* low professional bun */}
+            <mesh position={[0, 1.76, -0.2]} castShadow>
+              <sphereGeometry args={[0.085, 12, 12]} />
+              <meshStandardMaterial color={hair} roughness={0.95} />
+            </mesh>
+            {/* side fringe */}
+            <mesh position={[0.12, 1.86, 0.13]} rotation={[0.4, 0.3, 0]}>
+              <boxGeometry args={[0.1, 0.14, 0.04]} />
+              <meshStandardMaterial color={hair} roughness={0.95} />
+            </mesh>
+          </group>
+        )}
       </group>
-      {/* soft shadow blob */}
+      {/* soft contact shadow */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <circleGeometry args={[0.4, 20]} />
-        <meshBasicMaterial color="#000" transparent opacity={0.2} />
+        <circleGeometry args={[0.38, 20]} />
+        <meshBasicMaterial color="#000" transparent opacity={0.22} />
       </mesh>
     </group>
   );
@@ -308,8 +416,8 @@ function FpvArms({ store, kind }: { store: React.MutableRefObject<WorldStore>; k
   const group = useRef<THREE.Group>(null);
   const armL = useRef<THREE.Group>(null);
   const armR = useRef<THREE.Group>(null);
-  const shirt = kind === "GIRL" ? "#0d9488" : "#16a34a";
-  const skin = "#fcd9b8";
+  const shirt = kind === "GIRL" ? "#0f766e" : "#e8eef5";
+  const skin = kind === "GIRL" ? "#eec39a" : "#e0ac69";
   useFrame(({ camera }) => {
     const s = store.current;
     if (!group.current) return;
@@ -355,14 +463,15 @@ function CameraRig({ store }: { store: React.MutableRefObject<WorldStore> }) {
     const fx = Math.sin(s.yaw);
     const fz = Math.cos(s.yaw);
     if (s.fpv) {
-      const bob = s.moving && s.grounded ? Math.abs(Math.sin(s.gait)) * 0.07 : 0;
-      const eye = new THREE.Vector3(s.x, s.y + 1.62 + bob, s.z);
-      camera.position.lerp(eye, 0.55);
-      camera.lookAt(eye.x + fx, eye.y - 0.06, eye.z + fz);
+      const bob = s.moving && s.grounded ? Math.abs(Math.sin(s.gait)) * 0.045 : 0;
+      const eye = new THREE.Vector3(s.x, s.y + 1.58 + bob, s.z);
+      camera.position.lerp(eye, 0.5);
+      camera.lookAt(eye.x + fx, eye.y - 0.05, eye.z + fz);
     } else {
-      const target = new THREE.Vector3(s.x - fx * 5.2, s.y + 2.7, s.z - fz * 5.2);
-      camera.position.lerp(target, 0.09);
-      camera.lookAt(s.x, s.y + 1.35, s.z);
+      // over-the-shoulder follow: sees the whole character, damped for a clean feel
+      const target = new THREE.Vector3(s.x - fx * 4.6, s.y + 2.35, s.z - fz * 4.6);
+      camera.position.lerp(target, 0.075);
+      camera.lookAt(s.x, s.y + 1.25, s.z);
     }
   });
   return null;
@@ -436,137 +545,325 @@ function Cloud3D({ offset, speed, y, z }: { offset: number; speed: number; y: nu
 }
 
 // ================= station buildings (face the plaza) =================
+// shared architectural palette — deliberate, consistent, no random colors
+const WALL = "#f0e7d3";
+const WALL_DARK = "#e3d7bd";
+const ROOF = "#a8503a";
+const WOOD = "#7a5530";
+const WOOD_DARK = "#5d4024";
+const GLASS = "#aed4e6";
+const STONE = "#9aa0a6";
+
+function Window({ x, y, z, w = 0.42, h = 0.5 }: { x: number; y: number; z: number; w?: number; h?: number }) {
+  return (
+    <group position={[x, y, z]}>
+      <mesh>
+        <boxGeometry args={[w + 0.08, h + 0.08, 0.04]} />
+        <meshStandardMaterial color={WOOD} roughness={0.85} />
+      </mesh>
+      <mesh position={[0, 0, 0.022]}>
+        <boxGeometry args={[w, h, 0.02]} />
+        <meshStandardMaterial color={GLASS} metalness={0.35} roughness={0.15} />
+      </mesh>
+      <mesh position={[0, 0, 0.036]}>
+        <boxGeometry args={[0.025, h, 0.01]} />
+        <meshStandardMaterial color={WOOD} />
+      </mesh>
+      <mesh position={[0, 0, 0.036]}>
+        <boxGeometry args={[w, 0.025, 0.01]} />
+        <meshStandardMaterial color={WOOD} />
+      </mesh>
+    </group>
+  );
+}
+
+function Door({ x = 0, z, w = 0.5, h = 1.0, color = WOOD }: { x?: number; z: number; w?: number; h?: number; color?: string }) {
+  return (
+    <group position={[x, 0, z]}>
+      <mesh position={[0, h / 2 + 0.03, 0]}>
+        <boxGeometry args={[w + 0.1, h + 0.06, 0.05]} />
+        <meshStandardMaterial color={WOOD_DARK} roughness={0.85} />
+      </mesh>
+      <mesh position={[0, h / 2 + 0.03, 0.028]}>
+        <boxGeometry args={[w, h, 0.03]} />
+        <meshStandardMaterial color={color} roughness={0.7} />
+      </mesh>
+      <mesh position={[w / 3, h / 2, 0.05]}>
+        <sphereGeometry args={[0.03, 8, 8]} />
+        <meshStandardMaterial color="#d4af37" metalness={0.8} roughness={0.3} />
+      </mesh>
+      {/* doorstep */}
+      <mesh position={[0, 0.03, 0.18]} receiveShadow>
+        <boxGeometry args={[w + 0.25, 0.06, 0.3]} />
+        <meshStandardMaterial color={STONE} roughness={0.95} />
+      </mesh>
+    </group>
+  );
+}
+
 function Building({ type }: { type: StationType }) {
   switch (type) {
     case "HOME":
+      // tidy cottage: hip roof, chimney, framed windows
       return (
         <group>
-          <mesh position={[0, 0.7, 0]} castShadow>
-            <boxGeometry args={[1.8, 1.4, 1.5]} />
-            <meshStandardMaterial color="#fde68a" />
+          <mesh position={[0, 0.75, 0]} castShadow>
+            <boxGeometry args={[2.0, 1.5, 1.6]} />
+            <meshStandardMaterial color={WALL} roughness={0.9} />
           </mesh>
-          <mesh position={[0, 1.75, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[1.55, 1.0, 4]} />
-            <meshStandardMaterial color="#16a34a" />
+          <mesh position={[0, 1.78, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+            <coneGeometry args={[1.7, 0.95, 4]} />
+            <meshStandardMaterial color={ROOF} roughness={0.8} />
           </mesh>
-          <mesh position={[0, 0.45, 0.78]}>
-            <boxGeometry args={[0.45, 0.9, 0.06]} />
-            <meshStandardMaterial color="#92603d" />
+          <mesh position={[0.6, 2.1, -0.3]} castShadow>
+            <boxGeometry args={[0.22, 0.6, 0.22]} />
+            <meshStandardMaterial color="#8c5a44" roughness={0.9} />
+          </mesh>
+          <Door z={0.81} />
+          <Window x={-0.62} y={0.95} z={0.81} />
+          <Window x={0.62} y={0.95} z={0.81} />
+          {/* flower box */}
+          <mesh position={[-0.62, 0.62, 0.88]}>
+            <boxGeometry args={[0.5, 0.1, 0.12]} />
+            <meshStandardMaterial color={WOOD} />
           </mesh>
         </group>
       );
     case "VILLAGE_HALL":
+      // civic hall: stone base, portico columns, pediment, clock
       return (
         <group>
-          <mesh position={[0, 0.9, 0]} castShadow>
-            <boxGeometry args={[2.8, 1.8, 1.8]} />
-            <meshStandardMaterial color="#bfdbfe" />
+          <mesh position={[0, 0.1, 0]} receiveShadow castShadow>
+            <boxGeometry args={[3.2, 0.2, 2.2]} />
+            <meshStandardMaterial color={STONE} roughness={0.95} />
           </mesh>
-          <mesh position={[0, 2.25, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
-            <coneGeometry args={[2.3, 1.1, 4]} />
-            <meshStandardMaterial color="#3b82f6" />
+          <mesh position={[0, 1.1, -0.1]} castShadow>
+            <boxGeometry args={[2.9, 1.8, 1.8]} />
+            <meshStandardMaterial color={WALL} roughness={0.9} />
           </mesh>
-          {[-1, 1].map((sx) => (
-            <mesh key={sx} position={[sx, 0.7, 0.95]} castShadow>
-              <cylinderGeometry args={[0.09, 0.09, 1.4, 8]} />
-              <meshStandardMaterial color="#eff6ff" />
+          {/* portico columns */}
+          {[-1.1, -0.4, 0.4, 1.1].map((sx) => (
+            <mesh key={sx} position={[sx, 1.05, 0.95]} castShadow>
+              <cylinderGeometry args={[0.08, 0.09, 1.7, 12]} />
+              <meshStandardMaterial color="#faf6ec" roughness={0.7} />
             </mesh>
           ))}
-          <mesh position={[0, 0.55, 0.92]}>
-            <boxGeometry args={[0.6, 1.1, 0.06]} />
-            <meshStandardMaterial color="#1e40af" />
+          {/* entablature + pediment */}
+          <mesh position={[0, 2.02, 0.55]} castShadow>
+            <boxGeometry args={[3.1, 0.18, 1.1]} />
+            <meshStandardMaterial color={WALL_DARK} roughness={0.85} />
           </mesh>
+          <mesh position={[0, 2.42, 0.3]} rotation={[0, Math.PI / 4, 0]} castShadow>
+            <coneGeometry args={[2.15, 0.7, 4]} />
+            <meshStandardMaterial color={ROOF} roughness={0.8} />
+          </mesh>
+          {/* clock */}
+          <mesh position={[0, 2.12, 1.12]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.16, 0.16, 0.05, 20]} />
+            <meshStandardMaterial color="#faf6ec" />
+          </mesh>
+          <Door z={0.82} w={0.7} h={1.2} color="#355e8d" />
+          <Window x={-1.0} y={1.25} z={0.82} />
+          <Window x={1.0} y={1.25} z={0.82} />
         </group>
       );
     case "BIKE_DOCK":
+      // covered cycle shelter with proper racks
       return (
         <group>
-          <mesh position={[0, 0.08, 0]} receiveShadow>
-            <boxGeometry args={[2.6, 0.16, 1.6]} />
-            <meshStandardMaterial color="#a3e635" />
-          </mesh>
-          {[-0.8, 0, 0.8].map((sx) => (
-            <mesh key={sx} position={[sx, 0.5, 0]} castShadow>
-              <torusGeometry args={[0.28, 0.045, 8, 20]} />
-              <meshStandardMaterial color="#365314" />
+          {/* posts + mono-pitch canopy */}
+          {[[-1.15, -0.6], [1.15, -0.6], [-1.15, 0.6], [1.15, 0.6]].map(([px, pz], i) => (
+            <mesh key={i} position={[px, 0.75, pz]} castShadow>
+              <cylinderGeometry args={[0.05, 0.05, 1.5 + (pz < 0 ? 0.3 : 0), 8]} />
+              <meshStandardMaterial color={WOOD_DARK} roughness={0.85} />
             </mesh>
           ))}
-          <mesh position={[0, 1.35, -0.6]} castShadow>
-            <boxGeometry args={[2.2, 0.5, 0.1]} />
-            <meshStandardMaterial color="#365314" />
+          <mesh position={[0, 1.62, 0]} rotation={[0.22, 0, 0]} castShadow>
+            <boxGeometry args={[2.7, 0.07, 1.7]} />
+            <meshStandardMaterial color={ROOF} roughness={0.8} />
           </mesh>
-        </group>
-      );
-    case "SOLAR_FARM":
-      return (
-        <group>
-          {[-0.9, 0.5].map((sx) => (
-            <group key={sx} position={[sx, 0, 0]}>
-              <mesh position={[0, 0.5, 0]} castShadow>
-                <cylinderGeometry args={[0.06, 0.06, 1, 8]} />
-                <meshStandardMaterial color="#64748b" />
-              </mesh>
-              <mesh position={[0, 1.0, 0]} rotation={[-0.6, 0, 0]} castShadow>
-                <boxGeometry args={[1.2, 0.06, 0.9]} />
-                <meshStandardMaterial color="#1e3a8a" metalness={0.6} roughness={0.3} />
+          {/* rack rail + bikes */}
+          <mesh position={[0, 0.42, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.03, 0.03, 2.3, 8]} />
+            <meshStandardMaterial color="#8b949c" metalness={0.6} roughness={0.35} />
+          </mesh>
+          {[-0.7, 0, 0.7].map((sx) => (
+            <group key={sx} position={[sx, 0, 0.15]}>
+              {[-0.22, 0.22].map((wz) => (
+                <mesh key={wz} position={[0, 0.28, wz]} rotation={[0, Math.PI / 2, 0]} castShadow>
+                  <torusGeometry args={[0.22, 0.028, 8, 20]} />
+                  <meshStandardMaterial color="#2f3a44" roughness={0.5} />
+                </mesh>
+              ))}
+              <mesh position={[0, 0.42, 0]} rotation={[Math.PI / 2.6, 0, 0]}>
+                <cylinderGeometry args={[0.02, 0.02, 0.5, 6]} />
+                <meshStandardMaterial color="#0d9488" metalness={0.4} roughness={0.4} />
               </mesh>
             </group>
           ))}
         </group>
       );
-    case "RECYCLE_HUB":
+    case "SOLAR_FARM":
+      // neat 2×2 panel array + inverter cabinet
       return (
         <group>
-          <mesh position={[0, 0.75, 0]} castShadow>
-            <boxGeometry args={[2.2, 1.5, 1.6]} />
-            <meshStandardMaterial color="#a7f3d0" />
+          {[[-0.75, -0.4], [0.75, -0.4], [-0.75, 0.55], [0.75, 0.55]].map(([px, pz], i) => (
+            <group key={i} position={[px, 0, pz]}>
+              <mesh position={[0, 0.42, 0]} castShadow>
+                <cylinderGeometry args={[0.045, 0.05, 0.84, 8]} />
+                <meshStandardMaterial color="#6b7681" metalness={0.5} roughness={0.4} />
+              </mesh>
+              <mesh position={[0, 0.86, 0]} rotation={[-0.55, 0, 0]} castShadow>
+                <boxGeometry args={[1.25, 0.05, 0.85]} />
+                <meshStandardMaterial color="#16305e" metalness={0.7} roughness={0.25} />
+              </mesh>
+              {/* cell grid lines */}
+              <mesh position={[0, 0.883, 0.012]} rotation={[-0.55, 0, 0]}>
+                <boxGeometry args={[1.27, 0.015, 0.03]} />
+                <meshStandardMaterial color="#8fa3c8" />
+              </mesh>
+            </group>
+          ))}
+          {/* inverter cabinet */}
+          <mesh position={[1.6, 0.35, -1.0]} castShadow>
+            <boxGeometry args={[0.5, 0.7, 0.35]} />
+            <meshStandardMaterial color="#aab4bd" metalness={0.4} roughness={0.5} />
           </mesh>
-          <mesh position={[0, 1.7, 0]} castShadow>
-            <sphereGeometry args={[1.0, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <meshStandardMaterial color="#10b981" />
-          </mesh>
-          <mesh position={[0, 0.55, 0.82]}>
-            <boxGeometry args={[0.55, 1.0, 0.06]} />
-            <meshStandardMaterial color="#047857" />
+          <mesh position={[1.6, 0.45, -0.81]}>
+            <boxGeometry args={[0.3, 0.2, 0.02]} />
+            <meshStandardMaterial color="#2dd4bf" emissive="#0d9488" emissiveIntensity={0.4} />
           </mesh>
         </group>
       );
-    case "TRADING_POST":
+    case "RECYCLE_HUB":
+      // sorting shed + three colour-coded wheelie bins
       return (
         <group>
-          <mesh position={[0, 0.75, 0]} castShadow>
-            <boxGeometry args={[2.4, 1.5, 1.6]} />
-            <meshStandardMaterial color="#fecaca" />
+          <mesh position={[0, 0.8, -0.35]} castShadow>
+            <boxGeometry args={[2.5, 1.6, 1.1]} />
+            <meshStandardMaterial color={WALL_DARK} roughness={0.9} />
           </mesh>
-          {[-0.9, -0.3, 0.3, 0.9].map((sx, i) => (
-            <mesh key={sx} position={[sx, 1.62, 0.7]} rotation={[0.5, 0, 0]} castShadow>
-              <boxGeometry args={[0.6, 0.06, 0.8]} />
-              <meshStandardMaterial color={i % 2 ? "#ef4444" : "#fff1f2"} />
+          <mesh position={[0, 1.72, -0.35]} rotation={[0.16, 0, 0]} castShadow>
+            <boxGeometry args={[2.7, 0.07, 1.5]} />
+            <meshStandardMaterial color={ROOF} roughness={0.8} />
+          </mesh>
+          <Window x={0} y={1.1} z={0.21} w={0.9} h={0.4} />
+          {/* recycling arrows emblem */}
+          <mesh position={[-0.85, 1.15, 0.21]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.18, 0.18, 0.03, 3]} />
+            <meshStandardMaterial color="#059669" />
+          </mesh>
+          {[["#059669", -0.75], ["#2563eb", 0], ["#d97706", 0.75]].map(([color, sx]) => (
+            <group key={String(sx)} position={[sx as number, 0, 0.75]}>
+              <mesh position={[0, 0.34, 0]} castShadow>
+                <boxGeometry args={[0.44, 0.62, 0.42]} />
+                <meshStandardMaterial color={color as string} roughness={0.6} />
+              </mesh>
+              <mesh position={[0, 0.68, -0.02]} rotation={[-0.12, 0, 0]} castShadow>
+                <boxGeometry args={[0.46, 0.06, 0.46]} />
+                <meshStandardMaterial color={color as string} roughness={0.55} />
+              </mesh>
+            </group>
+          ))}
+        </group>
+      );
+    case "TRADING_POST":
+      // shopfront: display window, striped awning, hanging sign
+      return (
+        <group>
+          <mesh position={[0, 0.85, -0.1]} castShadow>
+            <boxGeometry args={[2.5, 1.7, 1.5]} />
+            <meshStandardMaterial color={WALL} roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 1.78, -0.1]} castShadow>
+            <boxGeometry args={[2.7, 0.14, 1.7]} />
+            <meshStandardMaterial color={WOOD_DARK} roughness={0.85} />
+          </mesh>
+          {/* display window */}
+          <group position={[-0.6, 0.9, 0.66]}>
+            <mesh>
+              <boxGeometry args={[1.0, 0.8, 0.05]} />
+              <meshStandardMaterial color={WOOD} />
+            </mesh>
+            <mesh position={[0, 0, 0.028]}>
+              <boxGeometry args={[0.88, 0.68, 0.02]} />
+              <meshStandardMaterial color={GLASS} metalness={0.35} roughness={0.12} />
+            </mesh>
+          </group>
+          <Door x={0.72} z={0.66} color="#7c2d12" />
+          {/* striped awning */}
+          {[-1.0, -0.6, -0.2, 0.2, 0.6, 1.0].map((sx, i) => (
+            <mesh key={sx} position={[sx, 1.52, 0.85]} rotation={[0.45, 0, 0]} castShadow>
+              <boxGeometry args={[0.4, 0.05, 0.75]} />
+              <meshStandardMaterial color={i % 2 ? "#b91c1c" : "#fdf3e7"} roughness={0.75} />
             </mesh>
           ))}
-          <mesh position={[0, 0.6, 0.82]}>
-            <boxGeometry args={[1.4, 0.7, 0.06]} />
-            <meshStandardMaterial color="#7f1d1d" />
+          {/* hanging shop sign */}
+          <mesh position={[1.32, 1.62, 0.75]}>
+            <boxGeometry args={[0.05, 0.3, 0.05]} />
+            <meshStandardMaterial color={WOOD_DARK} />
+          </mesh>
+          <mesh position={[1.32, 1.4, 0.75]}>
+            <boxGeometry args={[0.4, 0.28, 0.04]} />
+            <meshStandardMaterial color="#d4af37" metalness={0.6} roughness={0.35} />
           </mesh>
         </group>
       );
     case "HALL_OF_FAME":
+      // marble winners' podium flanked by columns, gold cup
       return (
         <group>
-          {[[0, 0.35, 1.3], [-1.0, 0.22, 0.9], [1.0, 0.15, 0.7]].map(([dx, h, w], i) => (
-            <mesh key={i} position={[dx as number, (h as number) / 2, 0]} castShadow>
-              <boxGeometry args={[w as number, h as number, 1]} />
-              <meshStandardMaterial color={i === 0 ? "#fbbf24" : i === 1 ? "#d1d5db" : "#d97706"} />
+          <mesh position={[0, 0.06, 0]} receiveShadow>
+            <cylinderGeometry args={[1.7, 1.8, 0.12, 24]} />
+            <meshStandardMaterial color={STONE} roughness={0.9} />
+          </mesh>
+          {[[0, 0.5, 0.9], [-0.95, 0.34, 0.8], [0.95, 0.22, 0.7]].map(([dx, h, w], i) => (
+            <mesh key={i} position={[dx as number, 0.12 + (h as number) / 2, 0]} castShadow>
+              <boxGeometry args={[w as number, h as number, 0.9]} />
+              <meshStandardMaterial color={i === 0 ? "#e6ddc8" : i === 1 ? "#d5cdb8" : "#c8bfa8"} roughness={0.55} />
             </mesh>
           ))}
-          <mesh position={[0, 0.75, 0]} castShadow>
-            <cylinderGeometry args={[0.18, 0.24, 0.5, 12]} />
-            <meshStandardMaterial color="#fde047" metalness={0.7} roughness={0.25} />
-          </mesh>
-          <mesh position={[0, 1.12, 0]} castShadow>
-            <sphereGeometry args={[0.22, 12, 12]} />
-            <meshStandardMaterial color="#fde047" metalness={0.7} roughness={0.25} />
-          </mesh>
+          {/* podium numbers as gold plates */}
+          {[[0, 0.62, "#d4af37"], [-0.95, 0.46, "#c0c0c0"], [0.95, 0.34, "#cd7f32"]].map(([dx, y, c], i) => (
+            <mesh key={i} position={[dx as number, y as number, 0.46]}>
+              <boxGeometry args={[0.22, 0.22, 0.02]} />
+              <meshStandardMaterial color={c as string} metalness={0.75} roughness={0.25} />
+            </mesh>
+          ))}
+          {/* flanking columns */}
+          {[-1.5, 1.5].map((sx) => (
+            <group key={sx} position={[sx, 0, -0.5]}>
+              <mesh position={[0, 0.9, 0]} castShadow>
+                <cylinderGeometry args={[0.1, 0.12, 1.8, 12]} />
+                <meshStandardMaterial color="#faf6ec" roughness={0.6} />
+              </mesh>
+              <mesh position={[0, 1.85, 0]}>
+                <boxGeometry args={[0.32, 0.1, 0.32]} />
+                <meshStandardMaterial color="#e6ddc8" />
+              </mesh>
+            </group>
+          ))}
+          {/* trophy with handles */}
+          <group position={[0, 0.62, 0]}>
+            <mesh position={[0, 0.5, 0]} castShadow>
+              <cylinderGeometry args={[0.2, 0.1, 0.34, 14]} />
+              <meshStandardMaterial color="#d4af37" metalness={0.85} roughness={0.2} />
+            </mesh>
+            <mesh position={[0, 0.26, 0]}>
+              <cylinderGeometry args={[0.05, 0.07, 0.16, 10]} />
+              <meshStandardMaterial color="#d4af37" metalness={0.85} roughness={0.2} />
+            </mesh>
+            <mesh position={[0, 0.16, 0]}>
+              <cylinderGeometry args={[0.13, 0.13, 0.06, 12]} />
+              <meshStandardMaterial color="#b8860b" metalness={0.7} roughness={0.3} />
+            </mesh>
+            {[-0.24, 0.24].map((sx) => (
+              <mesh key={sx} position={[sx, 0.52, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[0.09, 0.02, 8, 14, Math.PI]} />
+                <meshStandardMaterial color="#d4af37" metalness={0.85} roughness={0.2} />
+              </mesh>
+            ))}
+          </group>
         </group>
       );
   }
@@ -581,21 +878,61 @@ function StationNode({
   const faceCenter = Math.atan2(-s.x, -s.z);
   return (
     <group position={[s.x, 0, s.z]} rotation={[0, faceCenter, 0]}>
+      {/* paved stone pad */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0.4]} receiveShadow>
+        <circleGeometry args={[2.7, 28]} />
+        <meshStandardMaterial color="#c9c2b2" roughness={0.95} />
+      </mesh>
+      {/* proximity glow ring */}
+      {near && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0.4]}>
+          <ringGeometry args={[2.45, 2.7, 32]} />
+          <meshBasicMaterial color="#34d399" transparent opacity={0.75} />
+        </mesh>
+      )}
+
       <Building type={s.type} />
-      <Html center position={[0, 3.2, 0]} distanceFactor={13} zIndexRange={[10, 0]}>
-        <div className="pointer-events-none select-none flex flex-col items-center gap-0.5">
-          {marker && <div className="text-2xl eco-marker">{marker}</div>}
-          <div
-            className={`whitespace-nowrap rounded-full text-[11px] font-bold px-2.5 py-1 border shadow ${
-              near
-                ? "bg-emerald-500 text-white border-emerald-200 scale-110"
-                : "bg-slate-900/85 text-white border-white/20"
-            }`}
-          >
+
+      {/* information signboard — every stop says what it is */}
+      <group position={[1.95, 0, 1.7]} rotation={[0, -0.4, 0]}>
+        {[-0.42, 0.42].map((px) => (
+          <mesh key={px} position={[px, 0.62, 0]} castShadow>
+            <cylinderGeometry args={[0.04, 0.05, 1.24, 8]} />
+            <meshStandardMaterial color="#5d4024" roughness={0.9} />
+          </mesh>
+        ))}
+        <mesh position={[0, 1.34, 0]} castShadow>
+          <boxGeometry args={[1.3, 0.56, 0.07]} />
+          <meshStandardMaterial color="#7a5530" roughness={0.85} />
+        </mesh>
+        {/* board face rendered in 3D space */}
+        <Html
+          transform
+          position={[0, 1.34, 0.045]}
+          scale={0.32}
+          zIndexRange={[5, 0]}
+          style={{ pointerEvents: "none" }}
+        >
+          <div className="w-[360px] select-none text-center rounded bg-[#f7efdc] px-3 py-2 border-2 border-[#5d4024]">
+            <div className="text-[26px] font-black tracking-wide text-[#3d2c15] leading-tight">{s.name}</div>
+            <div className="text-[15px] font-medium text-[#6b5636] leading-tight">{s.tagline}</div>
+          </div>
+        </Html>
+      </group>
+
+      {/* floating quest marker */}
+      {marker && (
+        <Html center position={[0, 3.3, 0]} distanceFactor={13} zIndexRange={[10, 0]}>
+          <div className="pointer-events-none select-none text-3xl eco-marker">{marker}</div>
+        </Html>
+      )}
+      {near && (
+        <Html center position={[0, 2.7, 0]} distanceFactor={13} zIndexRange={[10, 0]}>
+          <div className="pointer-events-none select-none whitespace-nowrap rounded-full text-[11px] font-bold px-2.5 py-1 border shadow bg-emerald-500 text-white border-emerald-200">
             {s.name}
           </div>
-        </div>
-      </Html>
+        </Html>
+      )}
     </group>
   );
 }
@@ -672,14 +1009,69 @@ function Scene({
           </mesh>
         );
       })}
-      {/* plaza centerpiece */}
+      {/* plaza fountain */}
       <group position={[0, 0, 0]}>
-        <mesh position={[0, 0.5, 0]} castShadow>
-          <cylinderGeometry args={[0.35, 0.45, 1, 12]} />
-          <meshStandardMaterial color={isDark ? "#475569" : "#94a3b8"} />
+        <mesh position={[0, 0.18, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[1.15, 1.3, 0.36, 24]} />
+          <meshStandardMaterial color="#9aa0a6" roughness={0.85} />
         </mesh>
-        <Tree3D x={0} z={0} s={1.45} />
+        <mesh position={[0, 0.37, 0]}>
+          <cylinderGeometry args={[1.0, 1.0, 0.04, 24]} />
+          <meshStandardMaterial color="#7fc4dd" metalness={0.3} roughness={0.15} />
+        </mesh>
+        <mesh position={[0, 0.6, 0]} castShadow>
+          <cylinderGeometry args={[0.12, 0.16, 0.5, 12]} />
+          <meshStandardMaterial color="#9aa0a6" roughness={0.8} />
+        </mesh>
+        <mesh position={[0, 0.9, 0]} castShadow>
+          <cylinderGeometry args={[0.4, 0.45, 0.08, 18]} />
+          <meshStandardMaterial color="#9aa0a6" roughness={0.8} />
+        </mesh>
+        <mesh position={[0, 1.02, 0]}>
+          <sphereGeometry args={[0.1, 12, 12]} />
+          <meshStandardMaterial color="#bfe6f5" metalness={0.4} roughness={0.1} />
+        </mesh>
       </group>
+
+      {/* plaza lamp posts + benches */}
+      {[0.9, 2.47, 4.04, 5.6].map((a, i) => (
+        <group key={`lamp-${i}`} position={[Math.sin(a) * 2.9, 0, Math.cos(a) * 2.9]}>
+          <mesh position={[0, 1.15, 0]} castShadow>
+            <cylinderGeometry args={[0.035, 0.05, 2.3, 8]} />
+            <meshStandardMaterial color="#3d4852" roughness={0.6} />
+          </mesh>
+          <mesh position={[0, 2.32, 0]}>
+            <sphereGeometry args={[0.12, 12, 12]} />
+            <meshStandardMaterial
+              color="#fff7d6"
+              emissive={isDark ? "#ffedb3" : "#fff7d6"}
+              emissiveIntensity={isDark ? 1.2 : 0.15}
+            />
+          </mesh>
+        </group>
+      ))}
+      {[1.7, 4.8].map((a, i) => {
+        const bx = Math.sin(a) * 5.6;
+        const bz = Math.cos(a) * 5.6;
+        return (
+          <group key={`bench-${i}`} position={[bx, 0, bz]} rotation={[0, Math.atan2(-bx, -bz), 0]}>
+            <mesh position={[0, 0.28, 0]} castShadow>
+              <boxGeometry args={[1.1, 0.06, 0.36]} />
+              <meshStandardMaterial color={WOOD} roughness={0.85} />
+            </mesh>
+            <mesh position={[0, 0.55, -0.16]} rotation={[-0.2, 0, 0]} castShadow>
+              <boxGeometry args={[1.1, 0.34, 0.05]} />
+              <meshStandardMaterial color={WOOD} roughness={0.85} />
+            </mesh>
+            {[-0.45, 0.45].map((sx) => (
+              <mesh key={sx} position={[sx, 0.13, 0]} castShadow>
+                <boxGeometry args={[0.07, 0.26, 0.32]} />
+                <meshStandardMaterial color="#3d4852" roughness={0.6} />
+              </mesh>
+            ))}
+          </group>
+        );
+      })}
 
       {/* distant hills */}
       {[[-24, -20, 8], [4, -26, 10], [24, -18, 7], [-6, 26, 9], [22, 20, 7]].map(([x, z, r], i) => (
@@ -860,12 +1252,12 @@ const TUTORIAL_STEPS = [
   {
     icon: "🌍",
     title: "Welcome to EcoQuest World!",
-    body: "Your company's living 3D eco-village. Quests are real sustainability challenges, coins are real reward points — and you're in first person.",
+    body: "Your company's living 3D eco-village. Quests are real sustainability challenges, coins are real reward points — that's your character on screen.",
   },
   {
     icon: "🎮",
     title: "Move like a game",
-    body: "↑↓ (or W/S) walk forward & back · ←→ (or A/D) turn · hold Shift to run · Space to jump. Press C to switch between first-person and third-person camera.",
+    body: "↑↓ (or W/S) walk forward & back · ←→ (or A/D) turn · hold Shift to run · Space to jump. Press C to switch into first-person view (and back).",
   },
   {
     icon: "🗺️",
@@ -925,9 +1317,9 @@ export default function QuestWorld3D({
   hero, challenges, activities, rewards, leaders, redemptions, orgScore, airLabel, actions,
 }: Props) {
   const store = useRef<WorldStore>({
-    x: 0, z: 2.5, y: 0, yaw: Math.PI, vy: 0,
+    x: 0, z: 2.5, y: 0, yaw: Math.PI, vy: 0, speed: 0, turnVel: 0,
     grounded: true, moving: false, running: false,
-    clock: 0, gait: 0, keys: new Set(), paused: false, fpv: true,
+    clock: 0, gait: 0, keys: new Set(), paused: false, fpv: false,
   });
   const [mounted, setMounted] = useState(false);
   const [openStation, setOpenStation] = useState<Station3D | null>(null);
@@ -936,7 +1328,8 @@ export default function QuestWorld3D({
   const [showTutorial, setShowTutorial] = useState(false);
   const [avatar, setAvatar] = useState<AvatarKind | null>(null);
   const [showPicker, setShowPicker] = useState(false);
-  const [fpv, setFpv] = useState(true);
+  // default: third-person follow camera so you can see your character; C switches to first person
+  const [fpv, setFpv] = useState(false);
   const [levelUp, setLevelUp] = useState(false);
   const prevLevel = useRef(levelFromXp(hero.xp));
   const openStationRef = useRef<Station3D | null>(null);

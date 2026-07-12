@@ -73,6 +73,7 @@ export default async function DashboardPage() {
         }
       />
 
+      {!isAdmin && (
       <Link href="/quest" className="block mb-6 group">
         <div className="rounded-2xl bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 text-white p-4 sm:p-5 flex items-center gap-4 shadow-lg group-hover:shadow-xl transition-shadow overflow-hidden relative">
           <div className="absolute -right-4 -top-6 text-8xl opacity-15 rotate-12">🌳</div>
@@ -91,6 +92,7 @@ export default async function DashboardPage() {
           <ChevronRight className="shrink-0 group-hover:translate-x-1 transition-transform" />
         </div>
       </Link>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
         <StatCard label={isAdmin ? "Overall ESG" : "Dept ESG"} value={overall} icon={<Trophy size={18} />} tone="emerald" hint="/ 100" />
