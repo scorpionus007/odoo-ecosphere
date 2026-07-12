@@ -32,7 +32,7 @@ export async function acknowledgePolicy(formData: FormData) {
 }
 
 export async function remindPolicy(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const policyId = String(formData.get("policyId"));
   const policy = await db.esgPolicy.findUnique({
     where: { id: policyId },
@@ -41,7 +41,14 @@ export async function remindPolicy(formData: FormData) {
   if (!policy) return;
   const acked = new Set(policy.acknowledgements.map((a) => a.employeeId));
   const pending = await db.user.findMany({
-    where: { status: "ACTIVE", id: { notIn: [...acked] } },
+    where: {
+      status: "ACTIVE",
+      id: { notIn: [...acked] },
+      // managers nudge only their own department
+      ...(actor.role === "MANAGER" && actor.departmentId
+        ? { departmentId: actor.departmentId }
+        : {}),
+    },
   });
   await notifyMany(
     pending.map((u) => u.id),

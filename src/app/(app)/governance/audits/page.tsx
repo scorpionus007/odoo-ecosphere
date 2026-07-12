@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, btnSecondary } from "@/components/ui";
 import { createAudit, setAuditStatus } from "../actions";
 
@@ -7,13 +8,20 @@ export const dynamic = "force-dynamic";
 
 export default async function AuditsPage() {
   const user = await requireUser();
+  const scope = await getScope();
   const canManage = user.role === "ADMIN" || user.role === "MANAGER";
   const [audits, departments, managers] = await Promise.all([
     db.audit.findMany({
+      // non-admins: audits of their own department + org-wide audits
+      where: scope.isAdmin
+        ? {}
+        : { OR: [{ departmentId: scope.departmentId }, { departmentId: null }] },
       include: { department: true, auditor: true, issues: true },
       orderBy: { date: "desc" },
     }),
-    db.department.findMany({ where: { status: "ACTIVE" } }),
+    db.department.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { id: scope.departmentId } : {}) },
+    }),
     db.user.findMany({ where: { role: { in: ["ADMIN", "MANAGER"] } } }),
   ]);
 

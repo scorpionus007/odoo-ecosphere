@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, btnSecondary, StatCard } from "@/components/ui";
 import { createIssue, setIssueStatus, flagOverdueIssues } from "../actions";
 import { ShieldAlert, Clock } from "lucide-react";
@@ -8,15 +9,26 @@ export const dynamic = "force-dynamic";
 
 export default async function IssuesPage() {
   const user = await requireUser();
+  const scope = await getScope();
   const canManage = user.role === "ADMIN" || user.role === "MANAGER";
   const now = new Date();
   const [issues, users, audits] = await Promise.all([
     db.complianceIssue.findMany({
+      // non-admins: issues owned by members of their own department
+      where: scope.departmentId ? { owner: { departmentId: scope.departmentId } } : {},
       include: { owner: true, audit: true },
       orderBy: [{ status: "asc" }, { dueDate: "asc" }],
     }),
-    db.user.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } }),
-    db.audit.findMany({ orderBy: { date: "desc" } }),
+    db.user.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { departmentId: scope.departmentId } : {}) },
+      orderBy: { name: "asc" },
+    }),
+    db.audit.findMany({
+      where: scope.isAdmin
+        ? {}
+        : { OR: [{ departmentId: scope.departmentId }, { departmentId: null }] },
+      orderBy: { date: "desc" },
+    }),
   ]);
 
   const open = issues.filter((i) => i.status === "OPEN" || i.status === "IN_PROGRESS");

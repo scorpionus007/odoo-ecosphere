@@ -41,13 +41,21 @@ Open **http://localhost:3000**.
   diversity metrics, training completion
 - **Governance** — ESG policies + acknowledgements, audits, compliance issues
   with mandatory owner/due date and overdue flagging
-- **EcoQuest World** — gamification lives inside a playable eco-village: your
-  character walks between stations (Village Hall, Bike Dock, Solar Farm,
-  Recycle Hub, Trading Post, Hall of Fame) to accept quests, log progress,
-  submit proof, redeem rewards and view the leaderboard. XP levels, animated
-  HUD, badge auto-awards, and a village "air quality" that mirrors the live
-  organization ESG score. Managers run the challenge lifecycle (Draft → Active
-  → Under Review → Completed / Archived) from the Quest Studio.
+- **EcoQuest World (full 3D)** — gamification lives inside a playable 3D
+  eco-village (three.js): your modelled hero walks between stations (Village
+  Hall, Bike Dock, Solar Farm, Recycle Hub, Trading Post, Hall of Fame) with a
+  smooth follow-camera to accept quests, log progress, submit proof, claim
+  rewards and view the leaderboard. XP levels, animated HUD, badge auto-awards,
+  a first-time interactive tutorial (replay with the ? button) — and the
+  village fog is driven by your live ESG score: quest well and the smog lifts.
+  Gift-card rewards (Amazon / Starbucks / Decathlon) mint instant claim codes.
+  Managers run the challenge lifecycle (Draft → Active → Under Review →
+  Completed / Archived) from the Quest Studio.
+- **Department-scoped RBAC** — Admins see the whole organization. Managers and
+  Employees are locked to their own department everywhere: dashboards,
+  environmental data, diversity, training, approvals, reports and even export
+  APIs (server-side enforced). Managers can only approve, assign and manage
+  people inside their department.
 - **Scoring** — department E/S/G scores rolled into a configurable weighted
   overall ESG score (default 40/30/30)
 - **Reports** — Environmental / Social / Governance / ESG Summary + custom
@@ -70,9 +78,9 @@ Every §8 core rule from the problem statement is enforced and was tested end-to
 
 1. Sign in as **admin** → ESG Dashboard: overall weighted score, department rankings, emission trends
 2. Environmental → Operations: record a Fleet operation with the Diesel factor → watch the CO₂e appear automatically
-3. Sign in as **priya** (employee): open **EcoQuest World** — walk your character to the Village Hall to join a CSR event, attach a proof photo, then walk to the Trading Post and buy a reward with earned coins
-4. Sign in as **manager**: Approvals queue → approve Priya's participation → her XP jumps, the HUD levels up and a badge auto-awards
-5. Reports → Custom builder: filter by department + date range → export the same report as PDF, Excel and CSV
+3. Sign in as **priya** (employee): the first-time tutorial opens **EcoQuest World in 3D** — walk your hero to the Village Hall to join a CSR event, attach a proof photo, then walk to the Trading Post and buy an Amazon gift card → copy the instant claim code. Note her dashboard/reports only show *Operations* data.
+4. Sign in as **manager** (Meera, Operations): Approvals shows *only her department's* submissions → approve Priya → her XP jumps, the HUD levels up, a badge auto-awards and the village smog thins
+5. Reports → Custom builder: filter + export the same report as PDF, Excel and CSV (non-admins are server-side locked to their department, even via the API)
 6. Settings: flip the three business-rule toggles and the E/S/G weights live
 
 ## Stack
