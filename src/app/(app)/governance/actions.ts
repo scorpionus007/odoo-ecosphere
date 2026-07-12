@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireRole, requireUser } from "@/lib/auth";
 import { notify, notifyMany } from "@/lib/notify";
+import { assertCanManageEmployee } from "@/lib/scope";
 
 // ---------- Policies ----------
 
@@ -79,7 +80,7 @@ export async function setAuditStatus(formData: FormData) {
 // ---------- Compliance issues ----------
 
 export async function createIssue(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const title = String(formData.get("title") ?? "").trim();
   const description = String(formData.get("description") ?? "").trim();
   const severity = String(formData.get("severity") ?? "MEDIUM");
@@ -87,6 +88,7 @@ export async function createIssue(formData: FormData) {
   const dueDate = new Date(String(formData.get("dueDate"))); // mandatory
   const auditId = String(formData.get("auditId") ?? "") || null;
   if (!title || !ownerId || isNaN(dueDate.getTime())) return;
+  await assertCanManageEmployee(actor, ownerId); // managers assign owners within their department
   await db.complianceIssue.create({
     data: { title, description, severity, ownerId, dueDate, auditId },
   });
@@ -108,17 +110,27 @@ export async function setIssueStatus(formData: FormData) {
   if (!["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"].includes(status)) return;
   const issue = await db.complianceIssue.findUnique({ where: { id } });
   if (!issue) return;
-  // owner or manager/admin can update
-  if (issue.ownerId !== user.id && user.role === "EMPLOYEE") return;
+  // owner themselves, admin, or a manager over the owner's department
+  if (issue.ownerId !== user.id) {
+    if (user.role === "EMPLOYEE") return;
+    await assertCanManageEmployee(user, issue.ownerId);
+  }
   await db.complianceIssue.update({ where: { id }, data: { status } });
   revalidatePath("/governance/issues");
 }
 
 /** Flags overdue OPEN/IN_PROGRESS issues and notifies owners (feeds Notification System). */
 export async function flagOverdueIssues() {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const overdue = await db.complianceIssue.findMany({
-    where: { status: { in: ["OPEN", "IN_PROGRESS"] }, dueDate: { lt: new Date() } },
+    where: {
+      status: { in: ["OPEN", "IN_PROGRESS"] },
+      dueDate: { lt: new Date() },
+      // managers only sweep their own department's issues
+      ...(actor.role === "MANAGER" && actor.departmentId
+        ? { owner: { departmentId: actor.departmentId } }
+        : {}),
+    },
   });
   for (const i of overdue) {
     await notify(

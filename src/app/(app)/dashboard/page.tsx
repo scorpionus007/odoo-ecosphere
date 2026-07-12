@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { computeScores } from "@/lib/scoring";
-import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { levelFromXp } from "@/lib/game";
 import { PageHeader, Card, StatCard, Chip, Table, Th, Td } from "@/components/ui";
 import { BarBox, PieBox, ScoreGauge, AreaBox } from "@/components/charts";
@@ -10,18 +10,36 @@ import { Leaf, HeartHandshake, Scale, Trophy, Flame, ShieldAlert, Gamepad2, Chev
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const session = await requireUser();
+  const scope = await getScope();
+  const { user: session, isAdmin, deptWhere, departmentName } = scope;
   const me = await db.user.findUnique({ where: { id: session.id } });
-  const [{ departments, overall, weights }, totalCo2, activeChallenges, openIssues, csrCount, txByMonthRaw, txBySource] =
+  const [scoreData, totalCo2, activeChallenges, openIssues, csrCount, txByMonthRaw, txBySourceRaw] =
     await Promise.all([
       computeScores(),
-      db.carbonTransaction.aggregate({ _sum: { co2eKg: true } }),
+      db.carbonTransaction.aggregate({ where: deptWhere, _sum: { co2eKg: true } }),
       db.challenge.count({ where: { status: "ACTIVE" } }),
-      db.complianceIssue.count({ where: { status: { in: ["OPEN", "IN_PROGRESS"] } } }),
+      db.complianceIssue.count({
+        where: {
+          status: { in: ["OPEN", "IN_PROGRESS"] },
+          ...(scope.departmentId ? { owner: { departmentId: scope.departmentId } } : {}),
+        },
+      }),
       db.csrActivity.count(),
-      db.carbonTransaction.findMany({ select: { date: true, co2eKg: true }, orderBy: { date: "asc" } }),
-      db.carbonTransaction.groupBy({ by: ["source"], _sum: { co2eKg: true } }),
+      db.carbonTransaction.findMany({
+        where: deptWhere,
+        select: { date: true, co2eKg: true },
+        orderBy: { date: "asc" },
+      }),
+      db.carbonTransaction.groupBy({ by: ["source"], where: deptWhere, _sum: { co2eKg: true } }),
     ]);
+
+  // non-admins see only their own department's scores and rankings
+  const departments = isAdmin
+    ? scoreData.departments
+    : scoreData.departments.filter((d) => d.departmentId === scope.departmentId);
+  const weights = scoreData.weights;
+  const overall = isAdmin ? scoreData.overall : departments[0]?.totalScore ?? 0;
+  const txBySource = txBySourceRaw;
 
   // emissions trend by month
   const byMonth = new Map<string, number>();
@@ -47,8 +65,12 @@ export default async function DashboardPage() {
   return (
     <>
       <PageHeader
-        title="Organization ESG Dashboard"
-        subtitle={`Overall score = weighted avg of department scores (E ${weights.env}% / S ${weights.social}% / G ${weights.gov}%)`}
+        title={isAdmin ? "Organization ESG Dashboard" : `${departmentName ?? "My"} Department Dashboard`}
+        subtitle={
+          isAdmin
+            ? `Overall score = weighted avg of department scores (E ${weights.env}% / S ${weights.social}% / G ${weights.gov}%)`
+            : `Your department's ESG performance (weights E ${weights.env}% / S ${weights.social}% / G ${weights.gov}%) — organization-wide data is admin-only`
+        }
       />
 
       <Link href="/quest" className="block mb-6 group">
@@ -71,7 +93,7 @@ export default async function DashboardPage() {
       </Link>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
-        <StatCard label="Overall ESG" value={overall} icon={<Trophy size={18} />} tone="emerald" hint="/ 100" />
+        <StatCard label={isAdmin ? "Overall ESG" : "Dept ESG"} value={overall} icon={<Trophy size={18} />} tone="emerald" hint="/ 100" />
         <StatCard label="Environmental" value={avg("envScore")} icon={<Leaf size={18} />} tone="emerald" />
         <StatCard label="Social" value={avg("socialScore")} icon={<HeartHandshake size={18} />} tone="sky" />
         <StatCard label="Governance" value={avg("govScore")} icon={<Scale size={18} />} tone="violet" />
@@ -85,7 +107,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4 mb-6">
-        <Card title="Overall ESG Score">
+        <Card title={isAdmin ? "Overall ESG Score" : `${departmentName} ESG Score`}>
           <div className="flex items-center justify-center py-2">
             <ScoreGauge value={overall} label="Weighted score" size={220} />
           </div>
@@ -93,7 +115,7 @@ export default async function DashboardPage() {
             {csrCount} CSR activities · {activeChallenges} active challenges
           </div>
         </Card>
-        <Card title="Department ESG comparison" className="lg:col-span-2">
+        <Card title={isAdmin ? "Department ESG comparison" : "Your department E / S / G breakdown"} className="lg:col-span-2">
           <BarBox
             data={departments.map((d) => ({
               dept: d.code,
@@ -120,7 +142,7 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <Card title="Department ESG rankings">
+      <Card title={isAdmin ? "Department ESG rankings" : "Your department scorecard"}>
         <Table
           head={
             <>

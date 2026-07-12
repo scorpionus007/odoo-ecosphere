@@ -29,7 +29,7 @@ const NAV: Group[] = [
       { href: "/environmental/transactions", label: "Carbon Transactions", icon: <FlaskConical size={16} /> },
       { href: "/environmental/factors", label: "Emission Factors", icon: <Globe2 size={16} />, roles: ["ADMIN", "MANAGER"] },
       { href: "/environmental/goals", label: "Goals", icon: <Target size={16} /> },
-      { href: "/environmental/products", label: "Product Profiles", icon: <Package size={16} /> },
+      { href: "/environmental/products", label: "Product Profiles", icon: <Package size={16} />, roles: ["ADMIN", "MANAGER"] },
     ],
   },
   {

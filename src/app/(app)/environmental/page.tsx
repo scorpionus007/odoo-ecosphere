@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, StatCard, ProgressBar, Chip } from "@/components/ui";
 import { BarBox, PieBox } from "@/components/charts";
 import { Flame, Factory, Target, Globe2 } from "lucide-react";
@@ -6,12 +7,19 @@ import { Flame, Factory, Target, Globe2 } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export default async function EnvDashboard() {
+  const scope = await getScope();
+  const { isAdmin, deptWhere, departmentName } = scope;
   const [txs, goals, factors, byDept, byScope] = await Promise.all([
-    db.carbonTransaction.aggregate({ _sum: { co2eKg: true }, _count: true }),
-    db.environmentalGoal.findMany({ include: { department: true }, orderBy: { deadline: "asc" } }),
+    db.carbonTransaction.aggregate({ where: deptWhere, _sum: { co2eKg: true }, _count: true }),
+    db.environmentalGoal.findMany({
+      // non-admins: their department's goals + org-wide goals
+      where: isAdmin ? {} : { OR: [{ departmentId: scope.departmentId }, { departmentId: null }] },
+      include: { department: true },
+      orderBy: { deadline: "asc" },
+    }),
     db.emissionFactor.count({ where: { status: "ACTIVE" } }),
-    db.carbonTransaction.groupBy({ by: ["departmentId"], _sum: { co2eKg: true } }),
-    db.carbonTransaction.findMany({ include: { emissionFactor: true } }),
+    db.carbonTransaction.groupBy({ by: ["departmentId"], where: deptWhere, _sum: { co2eKg: true } }),
+    db.carbonTransaction.findMany({ where: deptWhere, include: { emissionFactor: true } }),
   ]);
 
   const departments = await db.department.findMany();
@@ -33,7 +41,11 @@ export default async function EnvDashboard() {
     <>
       <PageHeader
         title="Environmental Dashboard"
-        subtitle="Carbon accounting, department tracking and sustainability goals"
+        subtitle={
+          isAdmin
+            ? "Carbon accounting, department tracking and sustainability goals"
+            : `Carbon accounting and goals for ${departmentName ?? "your department"}`
+        }
       />
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         <StatCard

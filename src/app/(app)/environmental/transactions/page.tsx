@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, StatCard } from "@/components/ui";
 import { createManualTransaction } from "../actions";
@@ -14,10 +15,13 @@ export default async function TransactionsPage({
 }) {
   const { dept, source } = await searchParams;
   const user = await requireUser();
+  const scope = await getScope();
   const canEdit = user.role === "ADMIN" || user.role === "MANAGER";
 
   const where: Record<string, unknown> = {};
-  if (dept) where.departmentId = dept;
+  // non-admins are pinned to their own department regardless of filter input
+  if (scope.departmentId) where.departmentId = scope.departmentId;
+  else if (dept) where.departmentId = dept;
   if (source) where.source = source;
 
   const [txs, departments, factors, settings, total] = await Promise.all([
@@ -27,7 +31,7 @@ export default async function TransactionsPage({
       orderBy: { date: "desc" },
       take: 200,
     }),
-    db.department.findMany(),
+    db.department.findMany({ where: scope.departmentId ? { id: scope.departmentId } : {} }),
     db.emissionFactor.findMany({ where: { status: "ACTIVE" } }),
     getSettings(),
     db.carbonTransaction.aggregate({ where, _sum: { co2eKg: true } }),

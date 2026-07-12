@@ -34,13 +34,17 @@ export async function toggleFactor(formData: FormData) {
 // ---------- Operational records (Purchase / Manufacturing / Expense / Fleet) ----------
 
 export async function createOperation(formData: FormData) {
-  await requireUser();
+  const actor = await requireUser();
   const type = String(formData.get("type") ?? "PURCHASE");
   const description = String(formData.get("description") ?? "").trim();
   const quantity = Number(formData.get("quantity") ?? 0);
   const unit = String(formData.get("unit") ?? "").trim();
   const amount = formData.get("amount") ? Number(formData.get("amount")) : null;
-  const departmentId = String(formData.get("departmentId") ?? "");
+  // non-admins always record against their own department
+  const departmentId =
+    actor.role === "ADMIN"
+      ? String(formData.get("departmentId") ?? "")
+      : actor.departmentId ?? "";
   const emissionFactorId = String(formData.get("emissionFactorId") ?? "") || null;
   const dateStr = String(formData.get("date") ?? "");
   if (!description || quantity <= 0 || !departmentId) return;
@@ -84,9 +88,13 @@ export async function createOperation(formData: FormData) {
 
 // Manual carbon transaction (used when auto-calc is off, or for corrections)
 export async function createManualTransaction(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const emissionFactorId = String(formData.get("emissionFactorId") ?? "");
-  const departmentId = String(formData.get("departmentId") ?? "");
+  // managers correct only their own department's ledger
+  const departmentId =
+    actor.role === "ADMIN"
+      ? String(formData.get("departmentId") ?? "")
+      : actor.departmentId ?? "";
   const quantity = Number(formData.get("quantity") ?? 0);
   if (!emissionFactorId || !departmentId || quantity <= 0) return;
   const factor = await db.emissionFactor.findUnique({ where: { id: emissionFactorId } });
@@ -108,7 +116,7 @@ export async function createManualTransaction(formData: FormData) {
 // ---------- Goals ----------
 
 export async function createGoal(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const title = String(formData.get("title") ?? "").trim();
   const metric = String(formData.get("metric") ?? "").trim();
   const unit = String(formData.get("unit") ?? "kgCO2e").trim();
@@ -116,7 +124,11 @@ export async function createGoal(formData: FormData) {
   const target = Number(formData.get("target") ?? 0);
   const currentValue = Number(formData.get("currentValue") ?? baseline);
   const deadline = new Date(String(formData.get("deadline")));
-  const departmentId = String(formData.get("departmentId") ?? "") || null;
+  // managers create goals only for their own department
+  const departmentId =
+    actor.role === "ADMIN"
+      ? String(formData.get("departmentId") ?? "") || null
+      : actor.departmentId;
   if (!title || !metric || isNaN(deadline.getTime())) return;
   await db.environmentalGoal.create({
     data: { title, metric, unit, baseline, target, currentValue, deadline, departmentId },

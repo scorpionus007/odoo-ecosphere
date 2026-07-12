@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, btnSecondary } from "@/components/ui";
 import { addTraining, completeTraining } from "../actions";
 
@@ -7,13 +8,19 @@ export const dynamic = "force-dynamic";
 
 export default async function TrainingPage() {
   const user = await requireUser();
+  const scope = await getScope();
   const canManage = user.role === "ADMIN" || user.role === "MANAGER";
   const [records, employees] = await Promise.all([
     db.trainingRecord.findMany({
+      // managers see their department; admins see all
+      where: scope.departmentId ? { employee: { departmentId: scope.departmentId } } : {},
       include: { employee: { include: { department: true } } },
       orderBy: { createdAt: "desc" },
     }),
-    db.user.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } }),
+    db.user.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { departmentId: scope.departmentId } : {}) },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   const visible = canManage ? records : records.filter((r) => r.employeeId === user.id);

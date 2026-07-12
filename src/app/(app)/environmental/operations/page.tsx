@@ -1,18 +1,24 @@
 import { db } from "@/lib/db";
 import { getSettings } from "@/lib/settings";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary } from "@/components/ui";
 import { createOperation } from "../actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function OperationsPage() {
+  const scope = await getScope();
+  const { isAdmin, deptWhere, departmentName } = scope;
   const [records, departments, factors, settings] = await Promise.all([
     db.operationalRecord.findMany({
+      where: deptWhere, // non-admins see their department's operations only
       include: { department: true, emissionFactor: true, carbonTransaction: true },
       orderBy: { date: "desc" },
       take: 100,
     }),
-    db.department.findMany({ where: { status: "ACTIVE" } }),
+    db.department.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { id: scope.departmentId } : {}) },
+    }),
     db.emissionFactor.findMany({ where: { status: "ACTIVE" } }),
     getSettings(),
   ]);
@@ -21,7 +27,7 @@ export default async function OperationsPage() {
     <>
       <PageHeader
         title="Daily Business Operations"
-        subtitle={`Purchase · Manufacturing · Expenses · Fleet — auto emission calculation is ${
+        subtitle={`${isAdmin ? "" : `${departmentName ?? "Your department"} only — `}Purchase · Manufacturing · Expenses · Fleet — auto emission calculation is ${
           settings.autoEmissionCalc ? "ON: linked records generate carbon transactions automatically" : "OFF: add carbon transactions manually"
         }`}
       />

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { getScope } from "@/lib/scope";
 import { buildReport, ReportFilters } from "@/lib/report";
 import { PageHeader, Card, Table, Th, Td, Field, inputCls, btnPrimary, btnSecondary, EmptyState } from "@/components/ui";
 import { Leaf, HeartHandshake, Scale, Trophy, FileSpreadsheet, FileText, FileDown } from "lucide-react";
@@ -19,9 +20,11 @@ export default async function ReportsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
+  const scope = await getScope();
   const filters: ReportFilters = {
     module: (sp.module as ReportFilters["module"]) || "SUMMARY",
-    departmentId: sp.departmentId || undefined,
+    // non-admins are pinned to their own department, whatever the URL says
+    departmentId: scope.departmentId ?? (sp.departmentId || undefined),
     employeeId: sp.employeeId || undefined,
     challengeId: sp.challengeId || undefined,
     esgCategory: (sp.esgCategory as ReportFilters["esgCategory"]) || "",
@@ -31,8 +34,14 @@ export default async function ReportsPage({
 
   const [report, departments, employees, challenges] = await Promise.all([
     buildReport(filters),
-    db.department.findMany({ orderBy: { name: "asc" } }),
-    db.user.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } }),
+    db.department.findMany({
+      where: scope.departmentId ? { id: scope.departmentId } : {},
+      orderBy: { name: "asc" },
+    }),
+    db.user.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { departmentId: scope.departmentId } : {}) },
+      orderBy: { name: "asc" },
+    }),
     db.challenge.findMany({ orderBy: { title: "asc" } }),
   ]);
 
@@ -80,9 +89,14 @@ export default async function ReportsPage({
               <option value="GAMIFICATION">Gamification</option>
             </select>
           </Field>
-          <Field label="Department">
-            <select name="departmentId" defaultValue={filters.departmentId ?? ""} className={inputCls}>
-              <option value="">All departments</option>
+          <Field label={scope.isAdmin ? "Department" : "Department (locked to yours)"}>
+            <select
+              name="departmentId"
+              defaultValue={filters.departmentId ?? ""}
+              disabled={!scope.isAdmin}
+              className={`${inputCls} disabled:opacity-60`}
+            >
+              {scope.isAdmin && <option value="">All departments</option>}
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}

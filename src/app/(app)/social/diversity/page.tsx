@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, StatCard, Table, Th, Td } from "@/components/ui";
 import { PieBox, BarBox } from "@/components/charts";
 import { Users, UserCheck, GraduationCap } from "lucide-react";
@@ -6,10 +7,20 @@ import { Users, UserCheck, GraduationCap } from "lucide-react";
 export const dynamic = "force-dynamic";
 
 export default async function DiversityPage() {
+  const scope = await getScope();
+  const { departmentId } = scope;
   const [users, departments, trainings] = await Promise.all([
-    db.user.findMany({ where: { status: "ACTIVE" }, include: { department: true } }),
-    db.department.findMany({ where: { status: "ACTIVE" }, include: { members: true } }),
-    db.trainingRecord.findMany(),
+    db.user.findMany({
+      where: { status: "ACTIVE", ...(departmentId ? { departmentId } : {}) },
+      include: { department: true },
+    }),
+    db.department.findMany({
+      where: { status: "ACTIVE", ...(departmentId ? { id: departmentId } : {}) },
+      include: { members: true },
+    }),
+    db.trainingRecord.findMany({
+      where: departmentId ? { employee: { departmentId } } : {},
+    }),
   ]);
 
   const genderCounts = new Map<string, number>();
@@ -38,7 +49,14 @@ export default async function DiversityPage() {
 
   return (
     <>
-      <PageHeader title="Diversity Metrics" subtitle="Workforce composition and inclusion indicators" />
+      <PageHeader
+        title="Diversity Metrics"
+        subtitle={
+          scope.isAdmin
+            ? "Workforce composition and inclusion indicators"
+            : `Composition for ${scope.departmentName ?? "your department"}`
+        }
+      />
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         <StatCard label="Active employees" value={users.length} icon={<Users size={18} />} tone="sky" />
         <StatCard label="Women in workforce" value={`${femalePct}%`} icon={<UserCheck size={18} />} tone="violet" />

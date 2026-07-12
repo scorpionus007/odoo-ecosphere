@@ -7,9 +7,12 @@ export async function GET(req: NextRequest) {
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const sp = req.nextUrl.searchParams;
+  // non-admins can only export their own department's data — enforced server-side
+  const pinnedDept =
+    session.role === "ADMIN" ? sp.get("departmentId") || undefined : session.departmentId ?? "none";
   const filters: ReportFilters = {
     module: (sp.get("module") as ReportFilters["module"]) || "SUMMARY",
-    departmentId: sp.get("departmentId") || undefined,
+    departmentId: pinnedDept,
     employeeId: sp.get("employeeId") || undefined,
     challengeId: sp.get("challengeId") || undefined,
     esgCategory: (sp.get("esgCategory") as ReportFilters["esgCategory"]) || "",

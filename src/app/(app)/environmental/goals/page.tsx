@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { PageHeader, Card, Chip, ProgressBar, Field, inputCls, btnPrimary, btnSecondary } from "@/components/ui";
 import { createGoal, updateGoalProgress } from "../actions";
 
@@ -7,10 +8,18 @@ export const dynamic = "force-dynamic";
 
 export default async function GoalsPage() {
   const user = await requireUser();
+  const scope = await getScope();
   const canEdit = user.role === "ADMIN" || user.role === "MANAGER";
   const [goals, departments] = await Promise.all([
-    db.environmentalGoal.findMany({ include: { department: true }, orderBy: { deadline: "asc" } }),
-    db.department.findMany({ where: { status: "ACTIVE" } }),
+    db.environmentalGoal.findMany({
+      // non-admins: department goals + org-wide goals only
+      where: scope.isAdmin ? {} : { OR: [{ departmentId: scope.departmentId }, { departmentId: null }] },
+      include: { department: true },
+      orderBy: { deadline: "asc" },
+    }),
+    db.department.findMany({
+      where: { status: "ACTIVE", ...(scope.departmentId ? { id: scope.departmentId } : {}) },
+    }),
   ]);
 
   return (

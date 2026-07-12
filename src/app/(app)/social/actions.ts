@@ -6,6 +6,7 @@ import { requireRole, requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { notify } from "@/lib/notify";
 import { awardPoints } from "@/lib/gamify";
+import { assertCanManageEmployee } from "@/lib/scope";
 
 // ---------- CSR Activities ----------
 
@@ -57,7 +58,7 @@ export async function attachProof(formData: FormData) {
 }
 
 export async function decideParticipation(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const id = String(formData.get("id"));
   const decision = String(formData.get("decision")); // APPROVED | REJECTED
   const p = await db.employeeParticipation.findUnique({
@@ -65,6 +66,7 @@ export async function decideParticipation(formData: FormData) {
     include: { activity: true, employee: true },
   });
   if (!p || p.approvalStatus !== "PENDING") return;
+  await assertCanManageEmployee(actor, p.employeeId); // managers decide only for their department
 
   // Evidence Requirement toggle: cannot approve without proof
   const settings = await getSettings();
@@ -106,10 +108,11 @@ export async function decideParticipation(formData: FormData) {
 // ---------- Training ----------
 
 export async function addTraining(formData: FormData) {
-  await requireRole("ADMIN", "MANAGER");
+  const actor = await requireRole("ADMIN", "MANAGER");
   const employeeId = String(formData.get("employeeId"));
   const courseTitle = String(formData.get("courseTitle") ?? "").trim();
   if (!employeeId || !courseTitle) return;
+  await assertCanManageEmployee(actor, employeeId); // managers assign within their department
   await db.trainingRecord.create({ data: { employeeId, courseTitle } });
   revalidatePath("/social/training");
 }

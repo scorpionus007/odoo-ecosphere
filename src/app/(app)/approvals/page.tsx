@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
+import { getScope } from "@/lib/scope";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Table, Th, Td, Chip, EmptyState } from "@/components/ui";
 import { decideParticipation } from "../social/actions";
@@ -9,15 +10,18 @@ export const dynamic = "force-dynamic";
 
 export default async function ApprovalsPage() {
   await requireRole("ADMIN", "MANAGER");
+  const scope = await getScope();
   const settings = await getSettings();
+  // managers only review submissions from their own department
+  const deptFilter = scope.departmentId ? { employee: { departmentId: scope.departmentId } } : {};
   const [csrPending, challengePending] = await Promise.all([
     db.employeeParticipation.findMany({
-      where: { approvalStatus: "PENDING" },
+      where: { approvalStatus: "PENDING", ...deptFilter },
       include: { employee: { include: { department: true } }, activity: true },
       orderBy: { createdAt: "asc" },
     }),
     db.challengeParticipation.findMany({
-      where: { approvalStatus: "PENDING" },
+      where: { approvalStatus: "PENDING", ...deptFilter },
       include: { employee: { include: { department: true } }, challenge: true },
       orderBy: { createdAt: "asc" },
     }),
@@ -60,8 +64,8 @@ export default async function ApprovalsPage() {
     <>
       <PageHeader
         title="Approvals"
-        subtitle={`Pending CSR participations and challenge submissions${
-          settings.evidenceRequirement ? " — evidence requirement is ON" : ""
+        subtitle={`${scope.isAdmin ? "All departments" : `${scope.departmentName ?? "Your department"} submissions only`} — pending CSR participations and challenge submissions${
+          settings.evidenceRequirement ? " · evidence requirement is ON" : ""
         }`}
       />
 
