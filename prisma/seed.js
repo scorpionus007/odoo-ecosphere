@@ -85,10 +85,18 @@ async function main() {
 
     // 12 employees per department
     for (let eIndex = 1; eIndex <= 12; eIndex++) {
-      const u = generateUser("EMPLOYEE", dept.id, dept.code, eIndex);
-      const emp = await db.user.create({
-        data: { ...u, password: pass("employee123") },
-      });
+      let emp;
+      if (dept.code === "OPS" && eIndex === 1) {
+        // stable demo account referenced by README/login page
+        emp = await db.user.create({
+          data: { name: "Priya Sharma", email: "priya@ecosphere.io", password: pass("employee123"), role: "EMPLOYEE", gender: "FEMALE", departmentId: dept.id },
+        });
+      } else {
+        const u = generateUser("EMPLOYEE", dept.id, dept.code, eIndex);
+        emp = await db.user.create({
+          data: { ...u, password: pass("employee123") },
+        });
+      }
       employees.push(emp);
     }
   }

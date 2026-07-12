@@ -3,8 +3,8 @@ import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { PageHeader, Card, Field, inputCls, btnPrimary, Chip } from "@/components/ui";
-import { saveEsgConfig, saveNotificationSettings, setUserRole } from "./actions";
-import { Building2, Tags } from "lucide-react";
+import { saveEsgConfig, saveNotificationSettings, setUserRole, createUser } from "./actions";
+import { Building2, Tags, UserPlus } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +20,24 @@ function Toggle({ name, label, checked, hint }: { name: string; label: string; c
   );
 }
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ dept?: string; role?: string }>;
+}) {
   await requireRole("ADMIN");
-  const [settings, users] = await Promise.all([
+  const { dept, role } = await searchParams;
+  const [settings, users, departments] = await Promise.all([
     getSettings(),
-    db.user.findMany({ include: { department: true }, orderBy: { name: "asc" } }),
+    db.user.findMany({
+      where: {
+        ...(dept ? { departmentId: dept } : {}),
+        ...(role ? { role } : {}),
+      },
+      include: { department: true },
+      orderBy: [{ department: { name: "asc" } }, { role: "asc" }, { name: "asc" }],
+    }),
+    db.department.findMany({ where: { status: "ACTIVE" }, orderBy: { name: "asc" } }),
   ]);
 
   return (
@@ -111,7 +124,61 @@ export default async function SettingsPage() {
         </Card>
       </div>
 
-      <Card title="Users & roles">
+      <Card title="Create manager / employee account" className="mb-6">
+        <form action={createUser} className="grid sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+          <Field label="Full name">
+            <input name="name" required className={inputCls} />
+          </Field>
+          <Field label="Email">
+            <input name="email" type="email" required className={inputCls} />
+          </Field>
+          <Field label="Password (min 6)">
+            <input name="password" required minLength={6} className={inputCls} />
+          </Field>
+          <Field label="Role">
+            <select name="role" className={inputCls} defaultValue="EMPLOYEE">
+              <option value="EMPLOYEE">Employee</option>
+              <option value="MANAGER">Manager</option>
+            </select>
+          </Field>
+          <Field label="Department">
+            <select name="departmentId" className={inputCls} defaultValue="">
+              <option value="">— none —</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <button className={btnPrimary}>
+            <UserPlus size={14} /> Create account
+          </button>
+        </form>
+      </Card>
+
+      <Card title={`Users & roles (${users.length})`}>
+        <form method="GET" className="flex flex-wrap gap-2 items-end mb-4">
+          <Field label="Department">
+            <select name="dept" defaultValue={dept ?? ""} className={inputCls}>
+              <option value="">All departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Role">
+            <select name="role" defaultValue={role ?? ""} className={inputCls}>
+              <option value="">All roles</option>
+              <option value="ADMIN">Admin</option>
+              <option value="MANAGER">Manager</option>
+              <option value="EMPLOYEE">Employee</option>
+            </select>
+          </Field>
+          <button className={btnPrimary}>Filter</button>
+        </form>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>

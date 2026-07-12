@@ -63,6 +63,27 @@ export async function toggleCategory(formData: FormData) {
   revalidatePath("/settings/categories");
 }
 
+// ---------- Users (Admin creates accounts) ----------
+
+export async function createUser(formData: FormData) {
+  await requireRole("ADMIN");
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").toLowerCase().trim();
+  const password = String(formData.get("password") ?? "");
+  const role = String(formData.get("role") ?? "EMPLOYEE");
+  const departmentId = String(formData.get("departmentId") ?? "") || null;
+  const gender = String(formData.get("gender") ?? "") || null;
+  if (!name || !email || password.length < 6) return;
+  if (!["MANAGER", "EMPLOYEE"].includes(role)) return; // admins are not self-servable
+  const exists = await db.user.findUnique({ where: { email } });
+  if (exists) return;
+  const bcrypt = (await import("bcryptjs")).default;
+  await db.user.create({
+    data: { name, email, password: await bcrypt.hash(password, 10), role, departmentId, gender },
+  });
+  revalidatePath("/settings");
+}
+
 // ---------- Roles (Admin promotes users) ----------
 
 export async function setUserRole(formData: FormData) {

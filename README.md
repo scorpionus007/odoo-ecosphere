@@ -32,6 +32,10 @@ Open **http://localhost:3000**.
 | Manager | manager@ecosphere.io | manager123 |
 | Employee | priya@ecosphere.io | employee123 |
 
+The full seeded directory — ~105 users across 7 departments, listed department-wise —
+is in [CREDENTIALS.md](CREDENTIALS.md). Admins can also view, filter and create
+manager/employee accounts under **Settings → Users & roles**.
+
 ## Modules
 
 - **Environmental** — emission factor configuration, operational data
