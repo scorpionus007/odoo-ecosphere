@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { StationType, levelFromXp, levelProgress, xpToNext } from "@/lib/game";
 import ProofUpload from "@/components/ProofUpload";
-import { X, Zap, MapPin, HelpCircle, Copy, Check } from "lucide-react";
+import { X, Zap, MapPin, HelpCircle, Copy, Check, Video, UserRound } from "lucide-react";
 
 // ================= data shapes =================
 export type QuestChallenge = {
@@ -45,149 +45,333 @@ type Props = {
   orgScore: number; airLabel: string; actions: Actions;
 };
 
-// ================= 3D world layout =================
-type Station3D = { type: StationType; name: string; tagline: string; x: number };
-const S3D: Station3D[] = [
-  { type: "HOME", name: "My Eco Home", tagline: "Your stats, badges & level", x: -16 },
-  { type: "VILLAGE_HALL", name: "Village Hall", tagline: "CSR community quests", x: -10.5 },
-  { type: "BIKE_DOCK", name: "Bike Dock", tagline: "Green commute quests", x: -5 },
-  { type: "SOLAR_FARM", name: "Solar Farm", tagline: "Energy saver quests", x: 0.5 },
-  { type: "RECYCLE_HUB", name: "Recycle Hub", tagline: "Zero waste quests", x: 6 },
-  { type: "TRADING_POST", name: "Trading Post", tagline: "Claim gift cards & rewards", x: 11.5 },
-  { type: "HALL_OF_FAME", name: "Hall of Fame", tagline: "Leaderboard", x: 16.5 },
+// ================= world layout: compact village circle =================
+type Station3D = { type: StationType; name: string; tagline: string; x: number; z: number; angle: number };
+
+const RING_R = 10.5;
+const STATION_META: { type: StationType; name: string; tagline: string }[] = [
+  { type: "HOME", name: "My Eco Home", tagline: "Your stats, badges & level" },
+  { type: "VILLAGE_HALL", name: "Village Hall", tagline: "CSR community quests" },
+  { type: "BIKE_DOCK", name: "Bike Dock", tagline: "Green commute quests" },
+  { type: "SOLAR_FARM", name: "Solar Farm", tagline: "Energy saver quests" },
+  { type: "RECYCLE_HUB", name: "Recycle Hub", tagline: "Zero waste quests" },
+  { type: "TRADING_POST", name: "Trading Post", tagline: "Claim gift cards & rewards" },
+  { type: "HALL_OF_FAME", name: "Hall of Fame", tagline: "Leaderboard" },
 ];
-const roadZ = (x: number) => Math.sin(x * 0.3) * 0.9;
-const HERO_SPEED = 5.2;
+const S3D: Station3D[] = STATION_META.map((m, i) => {
+  const angle = (i / STATION_META.length) * Math.PI * 2 + Math.PI; // HOME in front of spawn
+  return { ...m, angle, x: Math.sin(angle) * RING_R, z: Math.cos(angle) * RING_R };
+});
+
+const WALK_SPEED = 4.4;
+const RUN_SPEED = 7.4;
+const TURN_SPEED = 2.7; // rad/s
+const JUMP_V = 5.4;
+const GRAVITY = 14.5;
+const INTERACT_DIST = 3.6;
+const WORLD_R = 20; // roam bounds
+
+type AvatarKind = "BOY" | "GIRL";
 
 type WorldStore = {
-  heroX: number; targetX: number | null; walking: boolean; facing: number;
-  pending: Station3D | null; clock: number;
+  x: number; z: number; y: number; yaw: number; vy: number;
+  grounded: boolean; moving: boolean; running: boolean;
+  clock: number; gait: number; // gait phase for limb swing
+  keys: Set<string>;
+  paused: boolean;
+  fpv: boolean;
 };
 
-// ================= tick engine (timer-driven, throttle-proof) =================
-function Ticker({ store, onArrive }: { store: React.MutableRefObject<WorldStore>; onArrive: (s: Station3D) => void }) {
-  const invalidate = useThree((s) => s.invalidate);
-  useEffect(() => {
-    let last = Date.now();
-    const id = setInterval(() => {
-      const now = Date.now();
-      const dt = Math.min(0.1, (now - last) / 1000);
-      last = now;
-      const s = store.current;
-      s.clock += dt;
-      if (s.targetX !== null) {
-        const dir = Math.sign(s.targetX - s.heroX);
-        if (dir === 0 || Math.abs(s.targetX - s.heroX) <= HERO_SPEED * dt) {
-          s.heroX = s.targetX;
-          s.targetX = null;
-          s.walking = false;
-          const st = s.pending;
-          s.pending = null;
-          if (st) onArrive(st);
-        } else {
-          s.heroX += dir * HERO_SPEED * dt;
-          s.facing = dir;
-          s.walking = true;
-        }
+// ================= physics + input step (called from the main component's loop) =================
+function stepWorld(s: WorldStore, dt: number) {
+  s.clock += dt;
+  if (s.paused) {
+    s.moving = false;
+    return;
+  }
+  const k = s.keys;
+  const fwd = k.has("ArrowUp") || k.has("KeyW") ? 1 : k.has("ArrowDown") || k.has("KeyS") ? -0.62 : 0;
+  const turn = (k.has("ArrowLeft") || k.has("KeyA") ? 1 : 0) - (k.has("ArrowRight") || k.has("KeyD") ? 1 : 0);
+  s.running = k.has("ShiftLeft") || k.has("ShiftRight");
+
+  s.yaw += turn * TURN_SPEED * dt;
+
+  const speed = (s.running ? RUN_SPEED : WALK_SPEED) * fwd;
+  s.moving = fwd !== 0;
+  if (s.moving) {
+    s.gait += dt * (s.running ? 13 : 9);
+    const nx = s.x + Math.sin(s.yaw) * speed * dt;
+    const nz = s.z + Math.cos(s.yaw) * speed * dt;
+    const r = Math.hypot(nx, nz);
+    let px = r > WORLD_R ? (nx / r) * WORLD_R : nx;
+    let pz = r > WORLD_R ? (nz / r) * WORLD_R : nz;
+    for (const st of S3D) {
+      const dx = px - st.x;
+      const dz = pz - st.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 2.1 && d > 0.001) {
+        px = st.x + (dx / d) * 2.1;
+        pz = st.z + (dz / d) * 2.1;
       }
-      invalidate();
-    }, 16);
-    return () => clearInterval(id);
-  }, [store, onArrive, invalidate]);
-  return null;
+    }
+    s.x = px;
+    s.z = pz;
+  } else {
+    s.gait *= 0.9;
+  }
+
+  if (k.has("Space") && s.grounded) {
+    s.vy = JUMP_V;
+    s.grounded = false;
+  }
+  if (!s.grounded) {
+    s.y += s.vy * dt;
+    s.vy -= GRAVITY * dt;
+    if (s.y <= 0) {
+      s.y = 0;
+      s.vy = 0;
+      s.grounded = true;
+    }
+  }
 }
 
-// ================= hero =================
-function Hero3D({ store }: { store: React.MutableRefObject<WorldStore> }) {
-  const group = useRef<THREE.Group>(null);
+/** Nearest station within interact distance (for the E prompt). */
+function nearestStation(s: WorldStore): Station3D | null {
+  let near: Station3D | null = null;
+  let best = INTERACT_DIST;
+  for (const st of S3D) {
+    const d = Math.hypot(s.x - st.x, s.z - st.z);
+    if (d < best) {
+      best = d;
+      near = st;
+    }
+  }
+  return near;
+}
+
+// ================= full-bodied avatar (boy / girl) =================
+function AvatarBody({
+  store, kind, visible,
+}: {
+  store: React.MutableRefObject<WorldStore>; kind: AvatarKind; visible: boolean;
+}) {
+  const root = useRef<THREE.Group>(null);
+  const armL = useRef<THREE.Group>(null);
+  const armR = useRef<THREE.Group>(null);
+  const legL = useRef<THREE.Group>(null);
+  const legR = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
-  const legL = useRef<THREE.Mesh>(null);
-  const legR = useRef<THREE.Mesh>(null);
-  useFrame(({ camera }) => {
+
+  const skin = "#fcd9b8";
+  const shirt = kind === "GIRL" ? "#0d9488" : "#16a34a";
+  const shirtLight = kind === "GIRL" ? "#14b8a6" : "#22c55e";
+  const pants = kind === "GIRL" ? "#7c3aed" : "#365314";
+  const hair = kind === "GIRL" ? "#7c2d12" : "#1f2937";
+
+  useFrame(() => {
     const s = store.current;
-    const z = roadZ(s.heroX);
-    if (group.current) {
-      group.current.position.set(s.heroX, 0, z);
-      const targetRot = s.facing >= 0 ? Math.PI / 2 : -Math.PI / 2;
-      group.current.rotation.y += (targetRot - group.current.rotation.y) * 0.2;
+    if (!root.current) return;
+    root.current.visible = visible;
+    root.current.position.set(s.x, s.y, s.z);
+    root.current.rotation.y = s.yaw;
+    const swing = s.moving ? Math.sin(s.gait) * (s.running ? 0.95 : 0.65) : 0;
+    const idle = s.moving ? 0 : Math.sin(s.clock * 2) * 0.04;
+    if (armL.current) armL.current.rotation.x = swing;
+    if (armR.current) armR.current.rotation.x = -swing;
+    if (legL.current) legL.current.rotation.x = -swing;
+    if (legR.current) legR.current.rotation.x = swing;
+    if (body.current) body.current.position.y = (s.moving && s.grounded ? Math.abs(Math.sin(s.gait)) * 0.06 : idle);
+    // airborne pose
+    if (!s.grounded) {
+      if (legL.current) legL.current.rotation.x = -0.5;
+      if (legR.current) legR.current.rotation.x = 0.35;
+      if (armL.current) armL.current.rotation.x = -2.4;
+      if (armR.current) armR.current.rotation.x = -2.4;
     }
-    if (body.current) {
-      body.current.position.y = s.walking ? Math.abs(Math.sin(s.clock * 10)) * 0.14 : Math.sin(s.clock * 2) * 0.03;
-    }
-    const swing = s.walking ? Math.sin(s.clock * 10) * 0.6 : 0;
-    if (legL.current) legL.current.rotation.x = swing;
-    if (legR.current) legR.current.rotation.x = -swing;
-    // smooth camera follow
-    camera.position.x += (s.heroX - camera.position.x) * 0.06;
-    camera.position.y += (5.4 - camera.position.y) * 0.05;
-    camera.position.z += (10.5 - camera.position.z) * 0.05;
-    camera.lookAt(camera.position.x, 1.1, 0);
   });
+
   return (
-    <group ref={group}>
+    <group ref={root}>
       <group ref={body}>
-        {/* legs */}
-        <mesh ref={legL} position={[0.11, 0.42, 0]} castShadow>
-          <capsuleGeometry args={[0.09, 0.32, 4, 8]} />
-          <meshStandardMaterial color="#3f6212" />
-        </mesh>
-        <mesh ref={legR} position={[-0.11, 0.42, 0]} castShadow>
-          <capsuleGeometry args={[0.09, 0.32, 4, 8]} />
-          <meshStandardMaterial color="#365314" />
-        </mesh>
+        {/* legs (pivot at hips) */}
+        <group ref={legL} position={[0.12, 0.86, 0]}>
+          <mesh position={[0, -0.28, 0]} castShadow>
+            <capsuleGeometry args={[0.095, 0.4, 4, 8]} />
+            <meshStandardMaterial color={pants} />
+          </mesh>
+          {/* foot */}
+          <mesh position={[0, -0.56, 0.07]} castShadow>
+            <boxGeometry args={[0.16, 0.1, 0.3]} />
+            <meshStandardMaterial color="#78350f" />
+          </mesh>
+        </group>
+        <group ref={legR} position={[-0.12, 0.86, 0]}>
+          <mesh position={[0, -0.28, 0]} castShadow>
+            <capsuleGeometry args={[0.095, 0.4, 4, 8]} />
+            <meshStandardMaterial color={pants} />
+          </mesh>
+          <mesh position={[0, -0.56, 0.07]} castShadow>
+            <boxGeometry args={[0.16, 0.1, 0.3]} />
+            <meshStandardMaterial color="#78350f" />
+          </mesh>
+        </group>
         {/* torso */}
-        <mesh position={[0, 0.95, 0]} castShadow>
-          <capsuleGeometry args={[0.26, 0.45, 8, 16]} />
-          <meshStandardMaterial color="#16a34a" />
+        <mesh position={[0, 1.18, 0]} castShadow>
+          <capsuleGeometry args={[0.27, 0.42, 8, 16]} />
+          <meshStandardMaterial color={shirt} />
         </mesh>
-        {/* arms */}
-        <mesh position={[0.34, 0.95, 0]} rotation={[0, 0, -0.25]} castShadow>
-          <capsuleGeometry args={[0.07, 0.36, 4, 8]} />
-          <meshStandardMaterial color="#15803d" />
+        <mesh position={[0, 1.34, 0]} castShadow>
+          <capsuleGeometry args={[0.275, 0.16, 8, 16]} />
+          <meshStandardMaterial color={shirtLight} />
         </mesh>
-        <mesh position={[-0.34, 0.95, 0]} rotation={[0, 0, 0.25]} castShadow>
-          <capsuleGeometry args={[0.07, 0.36, 4, 8]} />
-          <meshStandardMaterial color="#15803d" />
-        </mesh>
+        {kind === "GIRL" && (
+          // skirt
+          <mesh position={[0, 0.92, 0]} castShadow>
+            <coneGeometry args={[0.34, 0.34, 14]} />
+            <meshStandardMaterial color={pants} />
+          </mesh>
+        )}
+        {/* arms (pivot at shoulders) */}
+        <group ref={armL} position={[0.34, 1.42, 0]}>
+          <mesh position={[0, -0.24, 0]} castShadow>
+            <capsuleGeometry args={[0.075, 0.36, 4, 8]} />
+            <meshStandardMaterial color={shirt} />
+          </mesh>
+          {/* hand */}
+          <mesh position={[0, -0.48, 0]} castShadow>
+            <sphereGeometry args={[0.085, 10, 10]} />
+            <meshStandardMaterial color={skin} />
+          </mesh>
+        </group>
+        <group ref={armR} position={[-0.34, 1.42, 0]}>
+          <mesh position={[0, -0.24, 0]} castShadow>
+            <capsuleGeometry args={[0.075, 0.36, 4, 8]} />
+            <meshStandardMaterial color={shirt} />
+          </mesh>
+          <mesh position={[0, -0.48, 0]} castShadow>
+            <sphereGeometry args={[0.085, 10, 10]} />
+            <meshStandardMaterial color={skin} />
+          </mesh>
+        </group>
         {/* head */}
-        <mesh position={[0, 1.62, 0]} castShadow>
-          <sphereGeometry args={[0.26, 24, 24]} />
-          <meshStandardMaterial color="#fcd9b8" />
+        <mesh position={[0, 1.78, 0]} castShadow>
+          <sphereGeometry args={[0.24, 24, 24]} />
+          <meshStandardMaterial color={skin} />
         </mesh>
         {/* eyes */}
-        <mesh position={[0.1, 1.68, 0.22]}>
-          <sphereGeometry args={[0.035, 8, 8]} />
+        <mesh position={[0.09, 1.82, 0.2]}>
+          <sphereGeometry args={[0.032, 8, 8]} />
           <meshStandardMaterial color="#1f2937" />
         </mesh>
-        <mesh position={[-0.1, 1.68, 0.22]}>
-          <sphereGeometry args={[0.035, 8, 8]} />
+        <mesh position={[-0.09, 1.82, 0.2]}>
+          <sphereGeometry args={[0.032, 8, 8]} />
           <meshStandardMaterial color="#1f2937" />
         </mesh>
-        {/* leaf hat */}
-        <mesh position={[0, 1.86, 0]} rotation={[0.15, 0, 0]} castShadow>
-          <coneGeometry args={[0.3, 0.28, 16]} />
-          <meshStandardMaterial color="#15803d" />
-        </mesh>
-        <mesh position={[0.16, 2.0, 0]} rotation={[0, 0, -0.7]}>
-          <sphereGeometry args={[0.09, 8, 8]} />
-          <meshStandardMaterial color="#22c55e" />
+        {/* hair */}
+        {kind === "BOY" ? (
+          <mesh position={[0, 1.92, -0.02]} castShadow>
+            <sphereGeometry args={[0.235, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2.4]} />
+            <meshStandardMaterial color={hair} />
+          </mesh>
+        ) : (
+          <group>
+            <mesh position={[0, 1.9, -0.03]} castShadow>
+              <sphereGeometry args={[0.245, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+              <meshStandardMaterial color={hair} />
+            </mesh>
+            {/* ponytail */}
+            <mesh position={[0, 1.78, -0.26]} rotation={[0.5, 0, 0]} castShadow>
+              <capsuleGeometry args={[0.07, 0.34, 4, 8]} />
+              <meshStandardMaterial color={hair} />
+            </mesh>
+          </group>
+        )}
+        {/* leaf badge */}
+        <mesh position={[0.16, 1.4, 0.24]} rotation={[0, 0, -0.5]}>
+          <sphereGeometry args={[0.05, 8, 8]} />
+          <meshStandardMaterial color="#a3e635" />
         </mesh>
       </group>
-      {/* shadow blob */}
+      {/* soft shadow blob */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <circleGeometry args={[0.42, 24]} />
-        <meshBasicMaterial color="#000" transparent opacity={0.22} />
+        <circleGeometry args={[0.4, 20]} />
+        <meshBasicMaterial color="#000" transparent opacity={0.2} />
       </mesh>
     </group>
   );
 }
 
+// FPV arms — swing in view while walking, like a real first-person game
+function FpvArms({ store, kind }: { store: React.MutableRefObject<WorldStore>; kind: AvatarKind }) {
+  const group = useRef<THREE.Group>(null);
+  const armL = useRef<THREE.Group>(null);
+  const armR = useRef<THREE.Group>(null);
+  const shirt = kind === "GIRL" ? "#0d9488" : "#16a34a";
+  const skin = "#fcd9b8";
+  useFrame(({ camera }) => {
+    const s = store.current;
+    if (!group.current) return;
+    group.current.visible = s.fpv;
+    group.current.position.copy(camera.position);
+    group.current.quaternion.copy(camera.quaternion);
+    const swing = s.moving ? Math.sin(s.gait) * (s.running ? 0.5 : 0.32) : Math.sin(s.clock * 1.6) * 0.03;
+    if (armL.current) armL.current.position.z = -0.55 + Math.sin(s.gait) * (s.moving ? 0.12 : 0);
+    if (armR.current) armR.current.position.z = -0.55 - Math.sin(s.gait) * (s.moving ? 0.12 : 0);
+    if (armL.current) armL.current.rotation.x = -0.4 + swing * 0.4;
+    if (armR.current) armR.current.rotation.x = -0.4 - swing * 0.4;
+  });
+  return (
+    <group ref={group}>
+      <group ref={armL} position={[0.32, -0.42, -0.55]} rotation={[-0.4, 0.15, 0]}>
+        <mesh castShadow={false}>
+          <capsuleGeometry args={[0.075, 0.42, 4, 8]} />
+          <meshStandardMaterial color={shirt} />
+        </mesh>
+        <mesh position={[0, 0.28, 0]}>
+          <sphereGeometry args={[0.09, 10, 10]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+      </group>
+      <group ref={armR} position={[-0.32, -0.42, -0.55]} rotation={[-0.4, -0.15, 0]}>
+        <mesh>
+          <capsuleGeometry args={[0.075, 0.42, 4, 8]} />
+          <meshStandardMaterial color={shirt} />
+        </mesh>
+        <mesh position={[0, 0.28, 0]}>
+          <sphereGeometry args={[0.09, 10, 10]} />
+          <meshStandardMaterial color={skin} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+// camera rig: FPV head-cam with bob, or third-person follow
+function CameraRig({ store }: { store: React.MutableRefObject<WorldStore> }) {
+  useFrame(({ camera }) => {
+    const s = store.current;
+    const fx = Math.sin(s.yaw);
+    const fz = Math.cos(s.yaw);
+    if (s.fpv) {
+      const bob = s.moving && s.grounded ? Math.abs(Math.sin(s.gait)) * 0.07 : 0;
+      const eye = new THREE.Vector3(s.x, s.y + 1.62 + bob, s.z);
+      camera.position.lerp(eye, 0.55);
+      camera.lookAt(eye.x + fx, eye.y - 0.06, eye.z + fz);
+    } else {
+      const target = new THREE.Vector3(s.x - fx * 5.2, s.y + 2.7, s.z - fz * 5.2);
+      camera.position.lerp(target, 0.09);
+      camera.lookAt(s.x, s.y + 1.35, s.z);
+    }
+  });
+  return null;
+}
+
 // ================= scenery =================
 function Windmill({ x, z, scale = 1 }: { x: number; z: number; scale?: number }) {
   const rotor = useRef<THREE.Group>(null);
-  const store = useRef(0);
-  useFrame((_, __) => {
-    if (rotor.current) rotor.current.rotation.z = (store.current += 0.02);
+  const t = useRef(0);
+  useFrame(() => {
+    if (rotor.current) rotor.current.rotation.z = (t.current += 0.02);
   });
   return (
     <group position={[x, 0, z]} scale={scale}>
@@ -197,7 +381,7 @@ function Windmill({ x, z, scale = 1 }: { x: number; z: number; scale?: number })
       </mesh>
       <group ref={rotor} position={[0, 4.4, 0.15]}>
         {[0, 1, 2].map((i) => (
-          <mesh key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]} position={[0, 0, 0]} castShadow>
+          <mesh key={i} rotation={[0, 0, (i * Math.PI * 2) / 3]} castShadow>
             <boxGeometry args={[0.14, 1.9, 0.05]} />
             <meshStandardMaterial color="#f8fafc" />
           </mesh>
@@ -249,7 +433,7 @@ function Cloud3D({ offset, speed, y, z }: { offset: number; speed: number; y: nu
   );
 }
 
-// ================= station buildings =================
+// ================= station buildings (face the plaza) =================
 function Building({ type }: { type: StationType }) {
   switch (type) {
     case "HOME":
@@ -300,12 +484,10 @@ function Building({ type }: { type: StationType }) {
             <meshStandardMaterial color="#a3e635" />
           </mesh>
           {[-0.8, 0, 0.8].map((sx) => (
-            <group key={sx} position={[sx, 0, 0]}>
-              <mesh position={[0, 0.5, 0]} castShadow>
-                <torusGeometry args={[0.28, 0.045, 8, 20]} />
-                <meshStandardMaterial color="#365314" />
-              </mesh>
-            </group>
+            <mesh key={sx} position={[sx, 0.5, 0]} castShadow>
+              <torusGeometry args={[0.28, 0.045, 8, 20]} />
+              <meshStandardMaterial color="#365314" />
+            </mesh>
           ))}
           <mesh position={[0, 1.35, -0.6]} castShadow>
             <boxGeometry args={[2.2, 0.5, 0.1]} />
@@ -354,7 +536,6 @@ function Building({ type }: { type: StationType }) {
             <boxGeometry args={[2.4, 1.5, 1.6]} />
             <meshStandardMaterial color="#fecaca" />
           </mesh>
-          {/* striped awning */}
           {[-0.9, -0.3, 0.3, 0.9].map((sx, i) => (
             <mesh key={sx} position={[sx, 1.62, 0.7]} rotation={[0.5, 0, 0]} castShadow>
               <boxGeometry args={[0.6, 0.06, 0.8]} />
@@ -390,26 +571,25 @@ function Building({ type }: { type: StationType }) {
 }
 
 function StationNode({
-  s, marker, onWalk,
+  s, marker, near,
 }: {
-  s: Station3D; marker: string | null; onWalk: (s: Station3D) => void;
+  s: Station3D; marker: string | null; near: boolean;
 }) {
-  const z = roadZ(s.x) - 2.4;
+  // building faces the central plaza
+  const faceCenter = Math.atan2(-s.x, -s.z);
   return (
-    <group
-      position={[s.x, 0, z]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onWalk(s);
-      }}
-      onPointerOver={() => (document.body.style.cursor = "pointer")}
-      onPointerOut={() => (document.body.style.cursor = "default")}
-    >
+    <group position={[s.x, 0, s.z]} rotation={[0, faceCenter, 0]}>
       <Building type={s.type} />
-      <Html center position={[0, 3.1, 0]} distanceFactor={14} zIndexRange={[10, 0]}>
+      <Html center position={[0, 3.2, 0]} distanceFactor={13} zIndexRange={[10, 0]}>
         <div className="pointer-events-none select-none flex flex-col items-center gap-0.5">
           {marker && <div className="text-2xl eco-marker">{marker}</div>}
-          <div className="whitespace-nowrap rounded-full bg-slate-900/85 text-white text-[11px] font-bold px-2.5 py-1 border border-white/20 shadow">
+          <div
+            className={`whitespace-nowrap rounded-full text-[11px] font-bold px-2.5 py-1 border shadow ${
+              near
+                ? "bg-emerald-500 text-white border-emerald-200 scale-110"
+                : "bg-slate-900/85 text-white border-white/20"
+            }`}
+          >
             {s.name}
           </div>
         </div>
@@ -418,110 +598,167 @@ function StationNode({
   );
 }
 
-// ================= the scene =================
+// ================= scene =================
 function Scene({
-  store, stations, markers, onWalk, onArrive, airScore, isDark,
+  store, markers, nearType, airScore, isDark, avatar,
 }: {
   store: React.MutableRefObject<WorldStore>;
-  stations: Station3D[];
   markers: Record<string, string | null>;
-  onWalk: (s: Station3D) => void;
-  onArrive: (s: Station3D) => void;
+  nearType: StationType | null;
   airScore: number;
   isDark: boolean;
+  avatar: AvatarKind;
 }) {
   const sky = isDark ? "#0e2a52" : "#8ed1f5";
   const ground = isDark ? "#1a5632" : "#4cc06a";
-  const fogFar = 24 + airScore * 0.9; // low ESG score → smoggy village
+  const fogFar = 26 + airScore * 0.9;
   const fogColor = isDark ? "#22304a" : "#b9c6c9";
 
-  // road segments along the path
-  const segments: { x: number; z: number; rot: number; len: number }[] = [];
-  for (let x = -18; x < 18.5; x += 1) {
-    const z1 = roadZ(x);
-    const z2 = roadZ(x + 1);
-    segments.push({
-      x: x + 0.5,
-      z: (z1 + z2) / 2,
-      rot: Math.atan2(z2 - z1, 1),
-      len: Math.hypot(1, z2 - z1) + 0.06,
-    });
-  }
-
   const trees: [number, number, number][] = [];
-  for (let i = 0; i < 26; i++) {
-    const x = -19 + i * 1.55 + ((i * 37) % 7) * 0.22;
-    const behind = i % 2 === 0;
-    const z = behind ? -5.5 - ((i * 13) % 5) * 0.7 : 3.2 + ((i * 29) % 4) * 0.8;
-    trees.push([x, z, 0.7 + ((i * 17) % 6) * 0.12]);
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2 + 0.21;
+    const r = 15.5 + ((i * 13) % 5);
+    trees.push([Math.sin(a) * r, Math.cos(a) * r, 0.75 + ((i * 17) % 5) * 0.13]);
   }
 
   return (
     <>
       <color attach="background" args={[sky]} />
-      <fog attach="fog" args={[fogColor, 12, fogFar]} />
+      <fog attach="fog" args={[fogColor, 14, fogFar]} />
       <hemisphereLight intensity={isDark ? 0.5 : 0.9} color={sky} groundColor={ground} />
       <directionalLight
-        position={[8, 14, 6]}
+        position={[10, 16, 8]}
         intensity={isDark ? 0.7 : 1.4}
         castShadow
         shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-24}
-        shadow-camera-right={24}
-        shadow-camera-top={16}
-        shadow-camera-bottom={-16}
+        shadow-camera-left={-26}
+        shadow-camera-right={26}
+        shadow-camera-top={26}
+        shadow-camera-bottom={-26}
       />
-      {/* sun / moon */}
-      <mesh position={[14, 11, -14]}>
+      <mesh position={[16, 13, -18]}>
         <sphereGeometry args={[1.6, 20, 20]} />
         <meshBasicMaterial color={isDark ? "#e2e8f0" : "#fde047"} />
       </mesh>
 
-      <Ticker store={store} onArrive={onArrive} />
+      <CameraRig store={store} />
 
       {/* ground */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-        <planeGeometry args={[110, 60]} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <circleGeometry args={[46, 48]} />
         <meshStandardMaterial color={ground} />
       </mesh>
+      {/* ring road + plaza */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]} receiveShadow>
+        <ringGeometry args={[RING_R - 1.6, RING_R + 1.6, 64]} />
+        <meshStandardMaterial color={isDark ? "#8a7250" : "#d6b98c"} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0]} receiveShadow>
+        <circleGeometry args={[3.4, 32]} />
+        <meshStandardMaterial color={isDark ? "#8a7250" : "#d6b98c"} />
+      </mesh>
+      {/* spokes from plaza to each station */}
+      {S3D.map((s) => {
+        const midX = s.x * 0.55;
+        const midZ = s.z * 0.55;
+        const len = RING_R - 3.2;
+        const rot = Math.atan2(s.x, s.z);
+        return (
+          <mesh key={s.type} rotation={[-Math.PI / 2, 0, -rot]} position={[midX, 0.012, midZ]} receiveShadow>
+            <planeGeometry args={[1.1, len]} />
+            <meshStandardMaterial color={isDark ? "#8a7250" : "#d6b98c"} />
+          </mesh>
+        );
+      })}
+      {/* plaza centerpiece */}
+      <group position={[0, 0, 0]}>
+        <mesh position={[0, 0.5, 0]} castShadow>
+          <cylinderGeometry args={[0.35, 0.45, 1, 12]} />
+          <meshStandardMaterial color={isDark ? "#475569" : "#94a3b8"} />
+        </mesh>
+        <Tree3D x={0} z={0} s={1.45} />
+      </group>
+
       {/* distant hills */}
-      {[[-20, -14, 7], [-2, -16, 9], [17, -13, 6.5]].map(([x, z, r], i) => (
+      {[[-24, -20, 8], [4, -26, 10], [24, -18, 7], [-6, 26, 9], [22, 20, 7]].map(([x, z, r], i) => (
         <mesh key={i} position={[x, -r * 0.62, z]}>
           <sphereGeometry args={[r, 20, 16]} />
           <meshStandardMaterial color={isDark ? "#153f26" : "#3da65b"} />
         </mesh>
       ))}
 
-      {/* road */}
-      {segments.map((seg, i) => (
-        <mesh key={i} position={[seg.x, 0.015, seg.z]} rotation={[-Math.PI / 2, 0, -seg.rot]} receiveShadow>
-          <planeGeometry args={[seg.len, 1.7]} />
-          <meshStandardMaterial color={isDark ? "#8a7250" : "#d6b98c"} />
-        </mesh>
+      {trees.map(([x, z, sc], i) => (
+        <Tree3D key={i} x={x} z={z} s={sc} />
+      ))}
+      <Windmill x={-18} z={-12} />
+      <Windmill x={6} z={-19} scale={1.2} />
+      <Windmill x={19} z={10} scale={0.9} />
+      <Cloud3D offset={0} speed={0.012} y={10} z={-12} />
+      <Cloud3D offset={30} speed={0.008} y={12} z={-16} />
+      <Cloud3D offset={55} speed={0.015} y={9} z={8} />
+
+      {S3D.map((s) => (
+        <StationNode key={s.type} s={s} marker={markers[s.type] ?? null} near={nearType === s.type} />
       ))}
 
-      {/* scenery */}
-      {trees.map(([x, z, s], i) => (
-        <Tree3D key={i} x={x} z={z} s={s} />
-      ))}
-      <Windmill x={-13} z={-7.5} />
-      <Windmill x={3} z={-8.5} scale={1.2} />
-      <Windmill x={14.5} z={-7} scale={0.9} />
-      <Cloud3D offset={0} speed={0.012} y={9} z={-10} />
-      <Cloud3D offset={30} speed={0.008} y={10.5} z={-13} />
-      <Cloud3D offset={55} speed={0.015} y={8} z={-7} />
-
-      {/* stations */}
-      {stations.map((s) => (
-        <StationNode key={s.type} s={s} marker={markers[s.type] ?? null} onWalk={onWalk} />
-      ))}
-
-      <Hero3D store={store} />
+      <AvatarBody store={store} kind={avatar} visible={!store.current.fpv} />
+      <FpvArms store={store} kind={avatar} />
     </>
   );
 }
 
-// ================= UI primitives (game styled) =================
+// ================= minimap =================
+function Minimap({
+  store, markers, nearType,
+}: {
+  store: React.MutableRefObject<WorldStore>;
+  markers: Record<string, string | null>;
+  nearType: StationType | null;
+}) {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => force((n) => n + 1), 140);
+    return () => clearInterval(id);
+  }, []);
+  const s = store.current;
+  const SC = 130 / (WORLD_R * 2 + 6); // world → px
+  const px = (v: number) => 65 + v * SC;
+  const stationDot: Record<string, string> = {
+    HOME: "#fde68a", VILLAGE_HALL: "#3b82f6", BIKE_DOCK: "#a3e635", SOLAR_FARM: "#93c5fd",
+    RECYCLE_HUB: "#10b981", TRADING_POST: "#ef4444", HALL_OF_FAME: "#fbbf24",
+  };
+  return (
+    <div className="rounded-2xl bg-slate-900/80 backdrop-blur p-2 shadow-lg border border-white/10">
+      <svg width="130" height="130" className="block">
+        <circle cx="65" cy="65" r="62" fill="#0f172a" stroke="#334155" strokeWidth="2" />
+        {/* ring road */}
+        <circle cx="65" cy="65" r={RING_R * SC} fill="none" stroke="#8a7250" strokeWidth="4" opacity="0.7" />
+        {S3D.map((st) => (
+          <g key={st.type}>
+            <circle
+              cx={px(st.x)}
+              cy={px(st.z)}
+              r={nearType === st.type ? 6 : 4}
+              fill={stationDot[st.type]}
+              stroke={nearType === st.type ? "#fff" : "none"}
+              strokeWidth="1.5"
+            />
+            {markers[st.type] === "❗" && (
+              <circle cx={px(st.x) + 4} cy={px(st.z) - 4} r="2.4" fill="#f59e0b" />
+            )}
+          </g>
+        ))}
+        {/* player arrow */}
+        <g transform={`translate(${px(s.x)},${px(s.z)}) rotate(${(s.yaw * 180) / Math.PI})`}>
+          <polygon points="0,-7 4.6,4.5 0,2.2 -4.6,4.5" fill="#34d399" stroke="#fff" strokeWidth="1" />
+        </g>
+      </svg>
+      <div className="text-center text-[9px] text-slate-400 uppercase tracking-widest mt-1">Village map</div>
+    </div>
+  );
+}
+
+// ================= UI primitives =================
 function GameButton({
   children, tone = "green", disabled, title,
 }: {
@@ -585,33 +822,63 @@ function CopyCode({ code }: { code: string }) {
   );
 }
 
+// ================= avatar picker =================
+function AvatarPicker({ onPick }: { onPick: (k: AvatarKind) => void }) {
+  return (
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[3px] p-4">
+      <div className="eco-dialog max-w-lg w-full rounded-2xl border-4 border-emerald-600/70 bg-slate-900/95 text-white shadow-2xl p-6 text-center">
+        <div className="font-black text-xl mb-1">Choose your Eco Hero</div>
+        <p className="text-sm text-slate-400 mb-5">You can switch anytime with the 👤 button</p>
+        <div className="grid grid-cols-2 gap-4">
+          {(
+            [
+              { k: "GIRL" as AvatarKind, emoji: "👧", name: "Maya", desc: "Teal explorer · ponytail" },
+              { k: "BOY" as AvatarKind, emoji: "👦", name: "Arjun", desc: "Green ranger · leaf cap" },
+            ]
+          ).map((a) => (
+            <button
+              key={a.k}
+              onClick={() => onPick(a.k)}
+              className="group rounded-2xl border-2 border-slate-700 hover:border-emerald-500 bg-slate-800/70 p-5 transition-all hover:scale-[1.03] cursor-pointer"
+            >
+              <div className="text-6xl mb-3 group-hover:scale-110 transition-transform">{a.emoji}</div>
+              <div className="font-bold">{a.name}</div>
+              <div className="text-xs text-slate-400">{a.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ================= tutorial =================
-const TUTORIAL_KEY = "ecoquest-tutorial-v1";
+const TUTORIAL_KEY = "ecoquest-tutorial-v2";
 const TUTORIAL_STEPS = [
   {
     icon: "🌍",
     title: "Welcome to EcoQuest World!",
-    body: "This is your company's living eco-village in 3D. Everything here is real — quests are actual sustainability challenges, and coins are real reward points.",
+    body: "Your company's living 3D eco-village. Quests are real sustainability challenges, coins are real reward points — and you're in first person.",
   },
   {
-    icon: "🚶",
-    title: "Walk with a click",
-    body: "Click any building and your hero walks over. When you arrive, the building's quest board opens automatically.",
+    icon: "🎮",
+    title: "Move like a game",
+    body: "↑↓ (or W/S) walk forward & back · ←→ (or A/D) turn · hold Shift to run · Space to jump. Press C to switch between first-person and third-person camera.",
   },
   {
-    icon: "❗",
-    title: "Read the signs",
-    body: "❗ = new quests to accept · ⏳ = submitted, awaiting manager approval · ✅ = completed · 🪙 = you can afford something at the Trading Post.",
+    icon: "🗺️",
+    title: "Find your way",
+    body: "The minimap (top-right) shows all stations around the village circle — the green arrow is you. Orange dots mean new quests are waiting there.",
   },
   {
     icon: "⚡",
-    title: "Earn XP, level up",
-    body: "Completing quests and CSR events earns XP (levels + badges) and coins. The bar at the top-left is your level progress — badges unlock automatically.",
+    title: "Walk up & interact",
+    body: "Get close to any building and press E or Enter to open its quest board. ❗ new quests · ⏳ pending approval · ✅ done · 🪙 shop affordable.",
   },
   {
     icon: "🎁",
-    title: "Claim real rewards",
-    body: "Spend coins at the Trading Post: gift cards give you an instant claim code (Amazon, Starbucks…). The air of the village mirrors your real ESG score — quest well and the smog lifts!",
+    title: "Level up & claim rewards",
+    body: "Quests earn XP (levels, badges) and coins. Spend coins at the Trading Post — gift cards give instant claim codes. The village air mirrors your real ESG score!",
   },
 ];
 
@@ -640,9 +907,7 @@ function Tutorial({ onDone }: { onDone: () => void }) {
               </button>
             )}
             <GameButton tone="green">
-              <span
-                onClick={() => (step === TUTORIAL_STEPS.length - 1 ? onDone() : setStep(step + 1))}
-              >
+              <span onClick={() => (step === TUTORIAL_STEPS.length - 1 ? onDone() : setStep(step + 1))}>
                 {step === TUTORIAL_STEPS.length - 1 ? "Start exploring!" : "Next"}
               </span>
             </GameButton>
@@ -658,29 +923,85 @@ export default function QuestWorld3D({
   hero, challenges, activities, rewards, leaders, redemptions, orgScore, airLabel, actions,
 }: Props) {
   const store = useRef<WorldStore>({
-    heroX: S3D[0].x, targetX: null, walking: false, facing: 1, pending: null, clock: 0,
+    x: 0, z: 2.5, y: 0, yaw: Math.PI, vy: 0,
+    grounded: true, moving: false, running: false,
+    clock: 0, gait: 0, keys: new Set(), paused: false, fpv: true,
   });
   const [mounted, setMounted] = useState(false);
   const [openStation, setOpenStation] = useState<Station3D | null>(null);
+  const [nearStation, setNearStation] = useState<Station3D | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [avatar, setAvatar] = useState<AvatarKind | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [fpv, setFpv] = useState(true);
   const [levelUp, setLevelUp] = useState(false);
   const prevLevel = useRef(levelFromXp(hero.xp));
+  const openStationRef = useRef<Station3D | null>(null);
+  const nearRef = useRef<Station3D | null>(null);
+  openStationRef.current = openStation;
+  nearRef.current = nearStation;
 
   const level = levelFromXp(hero.xp);
   const progress = levelProgress(hero.xp);
 
+  // pause movement while a dialog / overlay is open
+  useEffect(() => {
+    store.current.paused = !!openStation || showTutorial || showPicker || !avatar;
+  }, [openStation, showTutorial, showPicker, avatar]);
+  useEffect(() => {
+    store.current.fpv = fpv;
+  }, [fpv]);
+
   useEffect(() => {
     setMounted(true);
     setIsDark(document.documentElement.classList.contains("dark"));
-    const obs = new MutationObserver(() =>
-      setIsDark(document.documentElement.classList.contains("dark"))
-    );
+    const obs = new MutationObserver(() => setIsDark(document.documentElement.classList.contains("dark")));
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
     try {
+      const saved = localStorage.getItem("ecoquest-avatar") as AvatarKind | null;
+      if (saved === "BOY" || saved === "GIRL") setAvatar(saved);
+      else setShowPicker(true);
       if (!localStorage.getItem(TUTORIAL_KEY)) setShowTutorial(true);
-    } catch {}
+    } catch {
+      setAvatar("BOY");
+    }
     return () => obs.disconnect();
+  }, []);
+
+  // keyboard controls
+  useEffect(() => {
+    const isTyping = () => {
+      const el = document.activeElement as HTMLElement | null;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    };
+    const down = (e: KeyboardEvent) => {
+      if (isTyping()) return;
+      const game = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "KeyW", "KeyA", "KeyS", "KeyD"];
+      if (game.includes(e.code)) {
+        e.preventDefault();
+        store.current.keys.add(e.code);
+      }
+      if (e.code === "ShiftLeft" || e.code === "ShiftRight") store.current.keys.add(e.code);
+      if (e.code === "KeyC") setFpv((v) => !v);
+      if ((e.code === "Enter" || e.code === "KeyE") && !openStationRef.current && nearRef.current) {
+        e.preventDefault();
+        setOpenStation(nearRef.current);
+      }
+      if (e.code === "Escape") setOpenStation(null);
+    };
+    const up = (e: KeyboardEvent) => {
+      store.current.keys.delete(e.code);
+    };
+    const blur = () => store.current.keys.clear();
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
   }, []);
 
   useEffect(() => {
@@ -708,18 +1029,47 @@ export default function QuestWorld3D({
     markers[s.type] = m;
   }
 
-  const walkTo = useCallback((s: Station3D) => {
-    setOpenStation(null);
-    const st = store.current;
-    if (Math.abs(st.heroX - s.x) < 0.6) {
-      setOpenStation(s);
-      return;
-    }
-    st.targetX = s.x;
-    st.pending = s;
+  // ===== physics + input loop (plain React, runs regardless of the canvas render mode) =====
+  const lastNear = useRef<StationType | null>(null);
+  useEffect(() => {
+    let last = Date.now();
+    let raf = 0;
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      const now = Date.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      stepWorld(store.current, dt);
+      const near = nearestStation(store.current);
+      const nt = store.current.paused ? null : near?.type ?? null;
+      if (nt !== lastNear.current) {
+        lastNear.current = nt;
+        setNearStation(nt ? near : null);
+      }
+    };
+    // rAF keeps physics in lockstep with rendering when the tab is active;
+    // a 33ms interval backs it up if rAF is throttled (background/embedded tabs).
+    const rafLoop = () => {
+      tick();
+      raf = requestAnimationFrame(rafLoop);
+    };
+    raf = requestAnimationFrame(rafLoop);
+    timer = setInterval(() => {
+      if (document.hidden) tick();
+    }, 33);
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timer) clearInterval(timer);
+    };
   }, []);
 
-  const onArrive = useCallback((s: Station3D) => setOpenStation(s), []);
+  const pickAvatar = useCallback((k: AvatarKind) => {
+    setAvatar(k);
+    setShowPicker(false);
+    try {
+      localStorage.setItem("ecoquest-avatar", k);
+    } catch {}
+  }, []);
   const dismissTutorial = useCallback(() => {
     setShowTutorial(false);
     try {
@@ -728,32 +1078,34 @@ export default function QuestWorld3D({
   }, []);
 
   return (
-    <div className="relative rounded-2xl overflow-hidden border-4 border-emerald-900/40 shadow-2xl select-none" style={{ height: "min(72vh, 700px)" }}>
+    <div
+      className="relative rounded-2xl overflow-hidden border-4 border-emerald-900/40 shadow-2xl select-none"
+      style={{ height: "min(74vh, 720px)" }}
+    >
       {/* ======= 3D canvas ======= */}
-      {mounted && (
+      {mounted && avatar && (
         <Canvas
-          frameloop="demand"
+          frameloop="always"
           shadows
           dpr={[1, 1.75]}
-          camera={{ position: [S3D[0].x, 5.4, 10.5], fov: 48 }}
+          camera={{ position: [0, 1.7, 4], fov: 68 }}
           className="!absolute inset-0"
         >
           <Scene
             store={store}
-            stations={S3D}
             markers={markers}
-            onWalk={walkTo}
-            onArrive={onArrive}
+            nearType={nearStation?.type ?? null}
             airScore={orgScore}
             isDark={isDark}
+            avatar={avatar}
           />
         </Canvas>
       )}
 
-      {/* ======= HUD ======= */}
+      {/* ======= HUD: hero card ======= */}
       <div className="absolute top-3 left-3 z-20 flex items-center gap-3 rounded-2xl bg-slate-900/80 backdrop-blur px-4 py-2.5 text-white shadow-lg">
         <div className="h-11 w-11 rounded-full bg-gradient-to-b from-emerald-400 to-green-600 flex items-center justify-center text-xl border-2 border-emerald-200">
-          🧑‍🌾
+          {avatar === "GIRL" ? "👧" : "👦"}
         </div>
         <div className="min-w-44">
           <div className="flex items-center gap-2 text-sm font-bold">
@@ -772,32 +1124,69 @@ export default function QuestWorld3D({
         </div>
       </div>
 
-      <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-        <div className="rounded-2xl bg-slate-900/80 backdrop-blur px-4 py-2 text-white shadow-lg flex items-center gap-2">
-          <span className="eco-coin text-lg">🪙</span>
-          <span className="font-bold text-amber-300">{hero.points}</span>
-          <span className="text-[10px] text-slate-400 uppercase">coins</span>
+      {/* ======= HUD: coins/badges + minimap (top right) ======= */}
+      <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+          <div className="rounded-2xl bg-slate-900/80 backdrop-blur px-4 py-2 text-white shadow-lg flex items-center gap-2">
+            <span className="eco-coin text-lg">🪙</span>
+            <span className="font-bold text-amber-300">{hero.points}</span>
+          </div>
+          <div
+            className="rounded-2xl bg-slate-900/80 backdrop-blur px-3 py-2 text-base shadow-lg"
+            title={hero.badges.map((b) => b.name).join(", ") || "No badges yet"}
+          >
+            {hero.badges.length ? hero.badges.map((b) => b.icon).join(" ") : "🔒"}
+          </div>
+          <button
+            onClick={() => setFpv((v) => !v)}
+            className="h-10 w-10 rounded-2xl bg-slate-900/80 backdrop-blur text-white flex items-center justify-center shadow-lg hover:bg-slate-800 cursor-pointer"
+            title={fpv ? "Third-person camera (C)" : "First-person camera (C)"}
+          >
+            <Video size={16} />
+          </button>
+          <button
+            onClick={() => setShowPicker(true)}
+            className="h-10 w-10 rounded-2xl bg-slate-900/80 backdrop-blur text-white flex items-center justify-center shadow-lg hover:bg-slate-800 cursor-pointer"
+            title="Change avatar"
+          >
+            <UserRound size={16} />
+          </button>
+          <button
+            onClick={() => setShowTutorial(true)}
+            className="h-10 w-10 rounded-2xl bg-slate-900/80 backdrop-blur text-white flex items-center justify-center shadow-lg hover:bg-slate-800 cursor-pointer"
+            title="How to play"
+          >
+            <HelpCircle size={16} />
+          </button>
         </div>
-        <div
-          className="rounded-2xl bg-slate-900/80 backdrop-blur px-3 py-2 text-lg shadow-lg"
-          title={hero.badges.map((b) => b.name).join(", ") || "No badges yet"}
-        >
-          {hero.badges.length ? hero.badges.map((b) => b.icon).join(" ") : "🔒"}
-        </div>
-        <button
-          onClick={() => setShowTutorial(true)}
-          className="h-10 w-10 rounded-2xl bg-slate-900/80 backdrop-blur text-white flex items-center justify-center shadow-lg hover:bg-slate-800 cursor-pointer"
-          title="How to play"
-        >
-          <HelpCircle size={17} />
-        </button>
+        <Minimap store={store} markers={markers} nearType={nearStation?.type ?? null} />
       </div>
 
-      <div className="absolute bottom-3 left-3 z-20 rounded-xl bg-slate-900/75 backdrop-blur px-3 py-1.5 text-[11px] text-white shadow-lg flex items-center gap-2">
-        <span className={`h-2 w-2 rounded-full ${orgScore >= 70 ? "bg-emerald-400" : orgScore >= 40 ? "bg-amber-400" : "bg-rose-400"}`} />
-        Village air: <b>{orgScore}/100</b>
-        <span className="text-slate-400">— live {airLabel} score (smog clears as it rises)</span>
+      {/* ======= controls hint + air quality ======= */}
+      <div className="absolute bottom-3 left-3 z-20 flex flex-col gap-1.5">
+        <div className="rounded-xl bg-slate-900/75 backdrop-blur px-3 py-1.5 text-[11px] text-white shadow-lg flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${orgScore >= 70 ? "bg-emerald-400" : orgScore >= 40 ? "bg-amber-400" : "bg-rose-400"}`} />
+          Village air: <b>{orgScore}/100</b>
+          <span className="text-slate-400 hidden sm:inline">— live {airLabel} score</span>
+        </div>
+        <div className="rounded-xl bg-slate-900/75 backdrop-blur px-3 py-1.5 text-[11px] text-slate-300 shadow-lg hidden md:flex items-center gap-2.5">
+          <span><b className="text-white">↑↓←→</b> move</span>
+          <span><b className="text-white">Shift</b> run</span>
+          <span><b className="text-white">Space</b> jump</span>
+          <span><b className="text-white">E</b> interact</span>
+          <span><b className="text-white">C</b> camera</span>
+        </div>
       </div>
+
+      {/* ======= interact prompt ======= */}
+      {nearStation && !openStation && !showTutorial && !showPicker && (
+        <div className="absolute inset-x-0 bottom-16 z-20 flex justify-center pointer-events-none">
+          <div className="eco-marker rounded-2xl bg-emerald-600/95 text-white font-bold text-sm px-5 py-2.5 shadow-xl border-2 border-emerald-300/60">
+            ⏎ Press <span className="bg-emerald-800 rounded px-1.5 py-0.5 mx-0.5">E</span> — {nearStation.name}
+            <span className="font-normal text-emerald-100 ml-1.5 hidden sm:inline">· {nearStation.tagline}</span>
+          </div>
+        </div>
+      )}
 
       {levelUp && (
         <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
@@ -820,6 +1209,7 @@ export default function QuestWorld3D({
               <button
                 onClick={() => setOpenStation(null)}
                 className="h-8 w-8 rounded-lg bg-slate-800 hover:bg-slate-700 flex items-center justify-center cursor-pointer"
+                title="Close (Esc)"
               >
                 <X size={15} />
               </button>
@@ -840,7 +1230,8 @@ export default function QuestWorld3D({
         </div>
       )}
 
-      {showTutorial && <Tutorial onDone={dismissTutorial} />}
+      {showPicker && <AvatarPicker onPick={pickAvatar} />}
+      {!showPicker && showTutorial && <Tutorial onDone={dismissTutorial} />}
     </div>
   );
 }
@@ -925,9 +1316,7 @@ function StationContent({
         </div>
         {redemptions.some((r) => r.voucherCode) && (
           <div>
-            <div className="text-xs uppercase tracking-wide text-emerald-400 font-bold mb-2">
-              🎫 Your claim codes
-            </div>
+            <div className="text-xs uppercase tracking-wide text-emerald-400 font-bold mb-2">🎫 Your claim codes</div>
             <div className="space-y-1.5">
               {redemptions
                 .filter((r) => r.voucherCode)
