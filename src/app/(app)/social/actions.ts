@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/settings";
 import { notify } from "@/lib/notify";
 import { awardPoints } from "@/lib/gamify";
 import { assertCanManageEmployee } from "@/lib/scope";
+import { verifyEvidence } from "@/lib/ai";
 
 // ---------- CSR Activities ----------
 
@@ -51,10 +52,28 @@ export async function attachProof(formData: FormData) {
   const user = await requireUser();
   const id = String(formData.get("id"));
   const proofUrl = String(formData.get("proofUrl") ?? "");
-  const p = await db.employeeParticipation.findUnique({ where: { id } });
+  const p = await db.employeeParticipation.findUnique({
+    where: { id },
+    include: { activity: { include: { category: true } } },
+  });
   if (!p || p.employeeId !== user.id) return;
   await db.employeeParticipation.update({ where: { id }, data: { proofUrl } });
+
+  // AI pre-screen (advisory): does the evidence plausibly match the activity?
+  const ai = await verifyEvidence({
+    claim: `Employee participated in the CSR activity "${p.activity.title}"`,
+    context: `${p.activity.category.name} activity: ${p.activity.description}${p.activity.location ? ` Location: ${p.activity.location}.` : ""}`,
+    fileUrl: proofUrl,
+  });
+  if (ai) {
+    await db.employeeParticipation.update({
+      where: { id },
+      data: { aiVerdict: ai.verdict, aiConfidence: ai.confidence, aiReason: ai.reason },
+    });
+  }
   revalidatePath("/social");
+  revalidatePath("/approvals");
+  revalidatePath("/quest");
 }
 
 export async function decideParticipation(formData: FormData) {

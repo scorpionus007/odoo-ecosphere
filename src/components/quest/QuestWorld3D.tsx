@@ -6,18 +6,20 @@ import { Html } from "@react-three/drei";
 import * as THREE from "three";
 import { StationType, levelFromXp, levelProgress, xpToNext } from "@/lib/game";
 import ProofUpload from "@/components/ProofUpload";
+import { AiBadge } from "@/components/ui";
 import { X, Zap, MapPin, HelpCircle, Copy, Check, Video, UserRound } from "lucide-react";
 
 // ================= data shapes =================
+export type AiCheck = { aiVerdict: string | null; aiConfidence: number | null; aiReason: string | null };
 export type QuestChallenge = {
   id: string; title: string; description: string; xp: number; difficulty: string;
   evidenceRequired: boolean; deadline: string; station: StationType;
-  mine: null | { id: string; progress: number; approvalStatus: string; proofUrl: string | null; xpAwarded: number };
+  mine: null | ({ id: string; progress: number; approvalStatus: string; proofUrl: string | null; xpAwarded: number } & AiCheck);
 };
 export type QuestActivity = {
   id: string; title: string; description: string; points: number; date: string;
   location: string | null; status: string;
-  mine: null | { id: string; approvalStatus: string; proofUrl: string | null; pointsEarned: number };
+  mine: null | ({ id: string; approvalStatus: string; proofUrl: string | null; pointsEarned: number } & AiCheck);
 };
 export type QuestReward = {
   id: string; name: string; description: string; type: string; brand: string | null;
@@ -1382,11 +1384,12 @@ function StationContent({
                     </form>
                   )}
                   {a.mine && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <QuestChip label={a.mine.approvalStatus} tone={statusTone(a.mine.approvalStatus)} />
                       {a.mine.approvalStatus === "PENDING" && !a.mine.proofUrl && (
                         <ProofUpload participationId={a.mine.id} action={actions.attachProof} />
                       )}
+                      <AiBadge verdict={a.mine.aiVerdict} confidence={a.mine.aiConfidence} reason={a.mine.aiReason} />
                     </div>
                   )}
                 </div>
@@ -1465,9 +1468,12 @@ function ChallengeList({
                   {!c.mine.proofUrl ? (
                     <ProofUpload participationId={c.mine.id} action={actions.attachChallengeProof} />
                   ) : (
-                    <a href={c.mine.proofUrl} target="_blank" className="text-xs text-sky-400 hover:underline">
-                      📎 proof attached
-                    </a>
+                    <span className="inline-flex items-center gap-2">
+                      <a href={c.mine.proofUrl} target="_blank" className="text-xs text-sky-400 hover:underline">
+                        📎 proof attached
+                      </a>
+                      <AiBadge verdict={c.mine.aiVerdict} confidence={c.mine.aiConfidence} reason={c.mine.aiReason} />
+                    </span>
                   )}
                 </div>
               )}

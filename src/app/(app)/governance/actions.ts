@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { requireRole, requireUser } from "@/lib/auth";
 import { notify, notifyMany } from "@/lib/notify";
 import { assertCanManageEmployee } from "@/lib/scope";
+import { verifyEvidence } from "@/lib/ai";
 
 // ---------- Policies ----------
 
@@ -165,6 +166,21 @@ export async function updateAssignment(formData: FormData) {
       closedAt: status === "COMPLIANT" ? new Date() : null,
     },
   });
+
+  // AI pre-screen (advisory) on newly attached compliance evidence
+  if (proofUrl) {
+    const ai = await verifyEvidence({
+      claim: `Department evidence for compliance requirement ${a.requirement.standard.replaceAll("_", " ")} ${a.requirement.code} — ${a.requirement.title}`,
+      context: a.requirement.description,
+      fileUrl: proofUrl,
+    });
+    if (ai) {
+      await db.complianceAssignment.update({
+        where: { id },
+        data: { aiVerdict: ai.verdict, aiConfidence: ai.confidence, aiReason: ai.reason },
+      });
+    }
+  }
   revalidatePath("/governance/standards");
   revalidatePath("/governance");
 }

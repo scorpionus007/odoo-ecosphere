@@ -80,6 +80,9 @@ export default async function QuestPage() {
             approvalStatus: mine.approvalStatus,
             proofUrl: mine.proofUrl,
             xpAwarded: mine.xpAwarded,
+            aiVerdict: mine.aiVerdict,
+            aiConfidence: mine.aiConfidence,
+            aiReason: mine.aiReason,
           }
         : null,
     };
@@ -101,6 +104,9 @@ export default async function QuestPage() {
             approvalStatus: mine.approvalStatus,
             proofUrl: mine.proofUrl,
             pointsEarned: mine.pointsEarned,
+            aiVerdict: mine.aiVerdict,
+            aiConfidence: mine.aiConfidence,
+            aiReason: mine.aiReason,
           }
         : null,
     };

@@ -6,6 +6,7 @@ import { requireRole, requireUser } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { awardPoints, runBadgeEngine } from "@/lib/gamify";
 import { assertCanManageEmployee } from "@/lib/scope";
+import { verifyEvidence } from "@/lib/ai";
 
 // ---------- Challenges (lifecycle: DRAFT → ACTIVE → UNDER_REVIEW → COMPLETED / ARCHIVED) ----------
 
@@ -65,10 +66,28 @@ export async function attachChallengeProof(formData: FormData) {
   const user = await requireUser();
   const id = String(formData.get("id"));
   const proofUrl = String(formData.get("proofUrl") ?? "");
-  const p = await db.challengeParticipation.findUnique({ where: { id } });
+  const p = await db.challengeParticipation.findUnique({
+    where: { id },
+    include: { challenge: { include: { category: true } } },
+  });
   if (!p || p.employeeId !== user.id) return;
   await db.challengeParticipation.update({ where: { id }, data: { proofUrl } });
+
+  // AI pre-screen (advisory): does the evidence plausibly match the challenge?
+  const ai = await verifyEvidence({
+    claim: `Employee completed (or made progress on) the sustainability challenge "${p.challenge.title}"`,
+    context: `${p.challenge.category.name} challenge: ${p.challenge.description}`,
+    fileUrl: proofUrl,
+  });
+  if (ai) {
+    await db.challengeParticipation.update({
+      where: { id },
+      data: { aiVerdict: ai.verdict, aiConfidence: ai.confidence, aiReason: ai.reason },
+    });
+  }
   revalidatePath("/gamification/challenges");
+  revalidatePath("/approvals");
+  revalidatePath("/quest");
 }
 
 export async function decideChallengeParticipation(formData: FormData) {

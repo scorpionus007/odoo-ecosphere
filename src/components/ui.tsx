@@ -138,6 +138,46 @@ export function EmptyState({ message }: { message: string }) {
   );
 }
 
+/** Advisory AI evidence-verification badge (Gemini pre-screen). Renders nothing without a verdict. */
+export function AiBadge({
+  verdict,
+  confidence,
+  reason,
+}: {
+  verdict: string | null;
+  confidence: number | null;
+  reason: string | null;
+}) {
+  if (!verdict) return null;
+  const styles: Record<string, { cls: string; icon: string; label: string }> = {
+    SUPPORTED: {
+      cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700",
+      icon: "✓",
+      label: "AI: consistent",
+    },
+    INCONSISTENT: {
+      cls: "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-200 border-rose-300 dark:border-rose-700",
+      icon: "✗",
+      label: "AI: mismatch",
+    },
+    UNCLEAR: {
+      cls: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 border-amber-300 dark:border-amber-700",
+      icon: "?",
+      label: "AI: unclear",
+    },
+  };
+  const s = styles[verdict] ?? styles.UNCLEAR;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap cursor-help ${s.cls}`}
+      title={`${reason ?? ""} (advisory pre-screen — final decision is yours)`}
+    >
+      {s.icon} {s.label}
+      {typeof confidence === "number" && ` ${confidence}%`}
+    </span>
+  );
+}
+
 export function Th({ children, className = "" }: { children?: ReactNode; className?: string }) {
   return (
     <th

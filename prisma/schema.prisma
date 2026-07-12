@@ -209,6 +209,9 @@ model EmployeeParticipation {
   activityId     String
   activity       CsrActivity @relation(fields: [activityId], references: [id])
   proofUrl       String?
+  aiVerdict      String? // SUPPORTED | INCONSISTENT | UNCLEAR (AI pre-screen, advisory only)
+  aiConfidence   Int?
+  aiReason       String?
   approvalStatus String    @default("PENDING") // PENDING | APPROVED | REJECTED
   pointsEarned   Int       @default(0)
   completionDate DateTime?
@@ -253,6 +256,9 @@ model ChallengeParticipation {
   employee       User     @relation(fields: [employeeId], references: [id])
   progress       Int      @default(0) // 0-100
   proofUrl       String?
+  aiVerdict      String? // SUPPORTED | INCONSISTENT | UNCLEAR (AI pre-screen, advisory only)
+  aiConfidence   Int?
+  aiReason       String?
   approvalStatus String   @default("PENDING") // PENDING | APPROVED | REJECTED
   xpAwarded      Int      @default(0)
   createdAt      DateTime @default(now())
@@ -322,6 +328,9 @@ model ComplianceAssignment {
   status        String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLIANT
   dueDate       DateTime?
   proofUrl      String? // evidence required to close
+  aiVerdict     String? // SUPPORTED | INCONSISTENT | UNCLEAR (AI pre-screen, advisory only)
+  aiConfidence  Int?
+  aiReason      String?
   closedAt      DateTime?
   createdAt     DateTime @default(now())
 

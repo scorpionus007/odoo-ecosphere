@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { getScope } from "@/lib/scope";
-import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, StatCard, EmptyState } from "@/components/ui";
+import { PageHeader, Card, Table, Th, Td, Chip, Field, inputCls, btnPrimary, StatCard, EmptyState, AiBadge } from "@/components/ui";
 import { assignRequirements, updateAssignment } from "../actions";
 import FileUploadField from "@/components/FileUploadField";
 import { ShieldCheck, ClipboardList, Clock, BadgeCheck } from "lucide-react";
@@ -144,9 +144,12 @@ export default async function StandardsPage() {
                   </Td>
                   <Td>
                     {a.proofUrl ? (
-                      <a href={a.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
-                        View proof
-                      </a>
+                      <div className="flex flex-col gap-1">
+                        <a href={a.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
+                          View proof
+                        </a>
+                        <AiBadge verdict={a.aiVerdict} confidence={a.aiConfidence} reason={a.aiReason} />
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
                     )}

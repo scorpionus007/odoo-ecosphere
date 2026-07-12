@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { requireRole } from "@/lib/auth";
 import { getScope } from "@/lib/scope";
 import { getSettings } from "@/lib/settings";
-import { PageHeader, Card, Table, Th, Td, Chip, EmptyState } from "@/components/ui";
+import { PageHeader, Card, Table, Th, Td, Chip, EmptyState, AiBadge } from "@/components/ui";
 import { decideParticipation } from "../social/actions";
 import { decideChallengeParticipation } from "../gamification/actions";
 
@@ -96,9 +96,12 @@ export default async function ApprovalsPage() {
                   <Td>{p.activity.pointsReward}</Td>
                   <Td>
                     {p.proofUrl ? (
-                      <a href={p.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
-                        View proof
-                      </a>
+                      <div className="flex flex-col gap-1">
+                        <a href={p.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
+                          View proof
+                        </a>
+                        <AiBadge verdict={p.aiVerdict} confidence={p.aiConfidence} reason={p.aiReason} />
+                      </div>
                     ) : (
                       <Chip label="No proof" tone={blocked ? "red" : "gray"} />
                     )}
@@ -147,9 +150,12 @@ export default async function ApprovalsPage() {
                   <Td>{p.challenge.xp}</Td>
                   <Td>
                     {p.proofUrl ? (
-                      <a href={p.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
-                        View proof
-                      </a>
+                      <div className="flex flex-col gap-1">
+                        <a href={p.proofUrl} target="_blank" className="text-sky-600 text-xs hover:underline">
+                          View proof
+                        </a>
+                        <AiBadge verdict={p.aiVerdict} confidence={p.aiConfidence} reason={p.aiReason} />
+                      </div>
                     ) : (
                       <Chip label="No proof" tone={blocked ? "red" : "gray"} />
                     )}
