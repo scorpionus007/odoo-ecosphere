@@ -20,6 +20,8 @@ npm run setup                 # pushes schema + seeds demo data
 npm run dev
 ```
 
+Need a pristine demo state again? `npm run db:reset` wipes and re-seeds.
+
 Open **http://localhost:3000**.
 
 ### Demo accounts
