@@ -65,7 +65,7 @@ export async function buildReport(f: ReportFilters): Promise<Report> {
       });
       return {
         title: "Social Report — CSR Participation",
-        columns: ["Employee", "Department", "Activity", "Category", "Status", "Points", "Completed"],
+        columns: ["Employee", "Department", "Activity", "Category", "Status", "Points", "Volunteer Hours", "Completed"],
         rows: rows.map((p) => [
           p.employee.name,
           p.employee.department?.name ?? "—",
@@ -73,6 +73,7 @@ export async function buildReport(f: ReportFilters): Promise<Report> {
           p.activity.category.name,
           p.approvalStatus,
           p.pointsEarned,
+          p.hoursVolunteered,
           p.completionDate ? p.completionDate.toISOString().slice(0, 10) : "—",
         ]),
       };

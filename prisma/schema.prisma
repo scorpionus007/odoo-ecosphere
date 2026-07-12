@@ -35,6 +35,7 @@ model User {
   trainings           TrainingRecord[]
   csrCreated          CsrActivity[]         @relation("CsrCreator")
   complianceOwned     ComplianceAssignment[] @relation("ComplianceOwner")
+  grievances          Grievance[]
 }
 
 model Department {
@@ -57,6 +58,7 @@ model Department {
   scores             DepartmentScore[]
   policies           EsgPolicy[]
   complianceAssignments ComplianceAssignment[]
+  grievances         Grievance[]
 }
 
 // ============ MASTER DATA ============
@@ -195,6 +197,7 @@ model CsrActivity {
   date         DateTime
   location     String?
   pointsReward Int      @default(50)
+  volunteerHours Float  @default(2) // hours credited per approved participant
   status       String   @default("UPCOMING") // UPCOMING | ONGOING | COMPLETED | CANCELLED
   createdById  String
   createdBy    User     @relation("CsrCreator", fields: [createdById], references: [id])
@@ -214,6 +217,7 @@ model EmployeeParticipation {
   aiReason       String?
   approvalStatus String    @default("PENDING") // PENDING | APPROVED | REJECTED
   pointsEarned   Int       @default(0)
+  hoursVolunteered Float   @default(0) // credited on approval (BRSR volunteer-hours reporting)
   completionDate DateTime?
   createdAt      DateTime  @default(now())
 
@@ -397,4 +401,36 @@ model Notification {
 model AppSetting {
   key   String @id
   value String // JSON-encoded
+}
+
+// ============ CARBON CREDITS (measure → reduce → offset the residual) ============
+
+model CarbonCredit {
+  id            String   @id @default(cuid())
+  projectName   String
+  registry      String   @default("VERRA") // VERRA | GOLD_STANDARD | CCTS | OTHER
+  vintage       Int? // credit vintage year
+  tonnes        Float
+  pricePerTonne Float?
+  status        String   @default("PURCHASED") // PURCHASED | RETIRED (only retired counts as offset)
+  purchasedAt   DateTime @default(now())
+  retiredAt     DateTime?
+  notes         String?
+}
+
+// ============ GRIEVANCE / ETHICS CHANNEL (BRSR P3) ============
+
+model Grievance {
+  id           String   @id @default(cuid())
+  category     String // HARASSMENT | SAFETY | ETHICS | DISCRIMINATION | OTHER
+  description  String
+  anonymous    Boolean  @default(false)
+  reporterId   String? // null when anonymous
+  reporter     User?    @relation(fields: [reporterId], references: [id])
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  status       String   @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED | DISMISSED
+  resolution   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }

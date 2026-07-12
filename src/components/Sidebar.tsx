@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Leaf, Factory, Target, FlaskConical, Package, HeartHandshake,
-  Users, GraduationCap, Scale, FileCheck2, ShieldAlert, ShieldCheck, ClipboardCheck,
-  Trophy, Gamepad2, FileBarChart2, Settings, Menu, X, Globe2,
+  Users, GraduationCap, Scale, FileCheck2, ShieldAlert, ShieldCheck, ShieldQuestion,
+  ClipboardCheck, Trophy, Gamepad2, FileBarChart2, Settings, Menu, X, Globe2,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -29,6 +29,7 @@ const NAV: Group[] = [
       { href: "/environmental/transactions", label: "Carbon Transactions", icon: <FlaskConical size={16} /> },
       { href: "/environmental/factors", label: "Emission Factors", icon: <Globe2 size={16} />, roles: ["ADMIN", "MANAGER"] },
       { href: "/environmental/goals", label: "Goals", icon: <Target size={16} /> },
+      { href: "/environmental/credits", label: "Carbon Credits", icon: <Leaf size={16} /> },
       { href: "/environmental/products", label: "Product Profiles", icon: <Package size={16} />, roles: ["ADMIN", "MANAGER"] },
     ],
   },
@@ -38,6 +39,7 @@ const NAV: Group[] = [
       { href: "/social", label: "CSR Activities", icon: <HeartHandshake size={16} /> },
       { href: "/social/diversity", label: "Diversity Metrics", icon: <Users size={16} /> },
       { href: "/social/training", label: "Training", icon: <GraduationCap size={16} /> },
+      { href: "/social/grievances", label: "Grievance Channel", icon: <ShieldQuestion size={16} /> },
     ],
   },
   {

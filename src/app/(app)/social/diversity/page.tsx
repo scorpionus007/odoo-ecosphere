@@ -2,14 +2,14 @@ import { db } from "@/lib/db";
 import { getScope } from "@/lib/scope";
 import { PageHeader, Card, StatCard, Table, Th, Td } from "@/components/ui";
 import { PieBox, BarBox } from "@/components/charts";
-import { Users, UserCheck, GraduationCap } from "lucide-react";
+import { Users, UserCheck, GraduationCap, HeartHandshake } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 export default async function DiversityPage() {
   const scope = await getScope();
   const { departmentId } = scope;
-  const [users, departments, trainings] = await Promise.all([
+  const [users, departments, trainings, volunteerAgg] = await Promise.all([
     db.user.findMany({
       where: { status: "ACTIVE", ...(departmentId ? { departmentId } : {}) },
       include: { department: true },
@@ -21,7 +21,15 @@ export default async function DiversityPage() {
     db.trainingRecord.findMany({
       where: departmentId ? { employee: { departmentId } } : {},
     }),
+    db.employeeParticipation.aggregate({
+      where: {
+        approvalStatus: "APPROVED",
+        ...(departmentId ? { employee: { departmentId } } : {}),
+      },
+      _sum: { hoursVolunteered: true },
+    }),
   ]);
+  const volunteerHours = Math.round((volunteerAgg._sum.hoursVolunteered ?? 0) * 10) / 10;
 
   const genderCounts = new Map<string, number>();
   for (const u of users) {
@@ -57,11 +65,12 @@ export default async function DiversityPage() {
             : `Composition for ${scope.departmentName ?? "your department"}`
         }
       />
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-6">
         <StatCard label="Active employees" value={users.length} icon={<Users size={18} />} tone="sky" />
         <StatCard label="Women in workforce" value={`${femalePct}%`} icon={<UserCheck size={18} />} tone="violet" />
         <StatCard label="Departments" value={departments.length} icon={<Users size={18} />} tone="emerald" />
         <StatCard label="Training completion" value={`${trainingRate}%`} icon={<GraduationCap size={18} />} tone="amber" />
+        <StatCard label="Volunteer hours" value={volunteerHours} hint="approved CSR" icon={<HeartHandshake size={18} />} tone="rose" />
       </div>
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
         <Card title="Gender distribution">

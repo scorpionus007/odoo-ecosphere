@@ -64,6 +64,9 @@ export default async function SocialPage() {
                   <input name="pointsReward" type="number" min="0" defaultValue={50} className={inputCls} />
                 </Field>
               </div>
+              <Field label="Volunteer hours credited per participant">
+                <input name="volunteerHours" type="number" min="0" step="0.5" defaultValue={2} className={inputCls} />
+              </Field>
               <button className={btnPrimary}>Create activity</button>
             </form>
           </Card>
@@ -93,6 +96,7 @@ export default async function SocialPage() {
                       <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-300 font-medium">
                         <Sparkles size={12} /> {a.pointsReward} pts
                       </span>
+                      <span className="text-slate-400">~{a.volunteerHours}h volunteering</span>
                     </div>
                     <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 max-w-xl">{a.description}</p>
                   </div>

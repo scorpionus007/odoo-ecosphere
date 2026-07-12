@@ -155,6 +155,31 @@ export async function updateGoalProgress(formData: FormData) {
   revalidatePath("/environmental");
 }
 
+// ---------- Carbon credits (offsets: only RETIRED credits count) ----------
+
+export async function createCredit(formData: FormData) {
+  await requireRole("ADMIN");
+  const projectName = String(formData.get("projectName") ?? "").trim();
+  const registry = String(formData.get("registry") ?? "VERRA");
+  const vintage = formData.get("vintage") ? Number(formData.get("vintage")) : null;
+  const tonnes = Number(formData.get("tonnes") ?? 0);
+  const pricePerTonne = formData.get("pricePerTonne") ? Number(formData.get("pricePerTonne")) : null;
+  if (!projectName || tonnes <= 0) return;
+  await db.carbonCredit.create({ data: { projectName, registry, vintage, tonnes, pricePerTonne } });
+  revalidatePath("/environmental/credits");
+  revalidatePath("/environmental");
+}
+
+export async function retireCredit(formData: FormData) {
+  await requireRole("ADMIN");
+  const id = String(formData.get("id"));
+  const c = await db.carbonCredit.findUnique({ where: { id } });
+  if (!c || c.status === "RETIRED") return;
+  await db.carbonCredit.update({ where: { id }, data: { status: "RETIRED", retiredAt: new Date() } });
+  revalidatePath("/environmental/credits");
+  revalidatePath("/environmental");
+}
+
 // ---------- Product ESG profiles ----------
 
 export async function createProduct(formData: FormData) {

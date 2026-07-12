@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireRole, requireUser } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany } from "@/lib/notify";
 import { awardPoints } from "@/lib/gamify";
 import { assertCanManageEmployee } from "@/lib/scope";
 import { verifyEvidence } from "@/lib/ai";
@@ -19,11 +19,59 @@ export async function createActivity(formData: FormData) {
   const date = new Date(String(formData.get("date")));
   const location = String(formData.get("location") ?? "") || null;
   const pointsReward = Number(formData.get("pointsReward") ?? 50);
+  const volunteerHours = Number(formData.get("volunteerHours") ?? 2);
   if (!title || !categoryId || isNaN(date.getTime())) return;
   await db.csrActivity.create({
-    data: { title, description, categoryId, date, location, pointsReward, createdById: user.id },
+    data: { title, description, categoryId, date, location, pointsReward, volunteerHours, createdById: user.id },
   });
   revalidatePath("/social");
+}
+
+// ---------- Grievance / ethics channel (BRSR P3) ----------
+
+export async function fileGrievance(formData: FormData) {
+  const user = await requireUser();
+  const category = String(formData.get("category") ?? "OTHER");
+  const description = String(formData.get("description") ?? "").trim();
+  const anonymous = formData.get("anonymous") === "on";
+  const departmentId = String(formData.get("departmentId") ?? "") || null;
+  if (!description) return;
+  await db.grievance.create({
+    data: { category, description, anonymous, reporterId: anonymous ? null : user.id, departmentId },
+  });
+  // alert admins (identity withheld when anonymous)
+  const admins = await db.user.findMany({ where: { role: "ADMIN", status: "ACTIVE" } });
+  await notifyMany(
+    admins.map((a) => a.id),
+    "GENERAL",
+    `New grievance filed: ${category}`,
+    anonymous ? "Filed anonymously." : `Filed by ${user.name}.`,
+    "/social/grievances"
+  );
+  revalidatePath("/social/grievances");
+}
+
+export async function updateGrievance(formData: FormData) {
+  const actor = await requireRole("ADMIN", "MANAGER");
+  const id = String(formData.get("id"));
+  const status = String(formData.get("status"));
+  const resolution = String(formData.get("resolution") ?? "") || undefined;
+  if (!["OPEN", "UNDER_REVIEW", "RESOLVED", "DISMISSED"].includes(status)) return;
+  const g = await db.grievance.findUnique({ where: { id } });
+  if (!g) return;
+  // managers triage only grievances tagged to their department
+  if (actor.role === "MANAGER" && g.departmentId !== actor.departmentId) return;
+  await db.grievance.update({ where: { id }, data: { status, ...(resolution ? { resolution } : {}) } });
+  if (g.reporterId && (status === "RESOLVED" || status === "DISMISSED")) {
+    await notify(
+      g.reporterId,
+      "GENERAL",
+      `Your grievance was ${status.toLowerCase()}`,
+      resolution ?? "See the grievance channel for details.",
+      "/social/grievances"
+    );
+  }
+  revalidatePath("/social/grievances");
 }
 
 export async function setActivityStatus(formData: FormData) {
@@ -99,6 +147,7 @@ export async function decideParticipation(formData: FormData) {
       data: {
         approvalStatus: "APPROVED",
         pointsEarned: p.activity.pointsReward,
+        hoursVolunteered: p.activity.volunteerHours, // BRSR volunteer-hours credit
         completionDate: new Date(),
       },
     });

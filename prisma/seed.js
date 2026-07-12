@@ -480,6 +480,24 @@ async function main() {
     },
   });
 
+  // ---- Carbon credits (offsets) ----
+  await db.carbonCredit.createMany({
+    data: [
+      { projectName: "Rajasthan Solar Aggregation", registry: "VERRA", vintage: 2024, tonnes: 5, pricePerTonne: 850, status: "RETIRED", retiredAt: new Date() },
+      { projectName: "Sundarbans Mangrove Restoration", registry: "GOLD_STANDARD", vintage: 2025, tonnes: 3, pricePerTonne: 1400, status: "PURCHASED" },
+    ],
+  });
+
+  // ---- Grievance channel ----
+  await db.grievance.create({
+    data: {
+      category: "SAFETY",
+      description: "Fire exit on floor 2 is blocked by stored boxes near the pantry.",
+      anonymous: true,
+      status: "UNDER_REVIEW",
+    },
+  });
+
   console.log("Seed: done.");
 }
 
