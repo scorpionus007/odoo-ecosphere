@@ -14,41 +14,98 @@ async function main() {
   console.log("Seed: creating demo data...");
 
   // ---- Departments ----
-  const [ops, hr, it, fin] = await Promise.all(
+  const [ops, hr, it, fin, mkt, scm, lgl] = await Promise.all(
     [
       { name: "Operations", code: "OPS" },
       { name: "Human Resources", code: "HR" },
       { name: "IT & Engineering", code: "IT" },
       { name: "Finance", code: "FIN" },
+      { name: "Marketing & Communications", code: "MKT" },
+      { name: "Supply Chain & Logistics", code: "SCM" },
+      { name: "Legal & Compliance", code: "LGL" },
     ].map((d) => db.department.create({ data: d }))
   );
 
   // ---- Users ----
   const pass = (p) => bcrypt.hashSync(p, 10);
+
+  const firstNamesMale = [
+    "Aarav", "Rohan", "Aditya", "Arjun", "Kabir", "Vivaan", "Vihaan", "Shaurya", "Atharva", "Ishan",
+    "Krishna", "Vikram", "Raj", "Amit", "Sanjay", "Vijay", "Suresh", "Ramesh", "Sunil", "Anil",
+    "Rahul", "Dev", "Alok", "Sameer", "Nikhil", "Pranav", "Ishaan", "Reyansh"
+  ];
+  const firstNamesFemale = [
+    "Diya", "Priya", "Ananya", "Isha", "Kavya", "Sneha", "Riya", "Aaradhya", "Kiara", "Myra",
+    "Nyra", "Saisha", "Meera", "Neha", "Pooja", "Sunita", "Anita", "Geeta", "Babita", "Rekha",
+    "Shreya", "Nisha", "Aarti", "Tanvi", "Riddhi", "Siddhi", "Anjali"
+  ];
+  const lastNames = [
+    "Sharma", "Patel", "Verma", "Iyer", "Rao", "Das", "Khan", "Kumar", "Singh", "Gupta",
+    "Joshi", "Nair", "Reddy", "Mehta", "Trivedi", "Shah", "Kulkarni", "Deshmukh", "Bhat", "Patil",
+    "Pillai", "Menon", "Sen", "Bose", "Choudhury", "Natarajan"
+  ];
+
+  function getRandomElement(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  function generateUser(role, departmentId, departmentCode, index) {
+    const isMale = Math.random() > 0.5;
+    const firstName = isMale ? getRandomElement(firstNamesMale) : getRandomElement(firstNamesFemale);
+    const lastName = getRandomElement(lastNames);
+    const name = `${firstName} ${lastName}`;
+    const email = `${role.toLowerCase()}.${departmentCode.toLowerCase()}.${index}@ecosphere.io`;
+    const gender = isMale ? "MALE" : "FEMALE";
+    return { name, email, gender, role, departmentId };
+  }
+
   const admin = await db.user.create({
     data: { name: "Aarav Admin", email: "admin@ecosphere.io", password: pass("admin123"), role: "ADMIN", gender: "MALE", departmentId: it.id },
   });
-  const manager = await db.user.create({
-    data: { name: "Meera Manager", email: "manager@ecosphere.io", password: pass("manager123"), role: "MANAGER", gender: "FEMALE", departmentId: ops.id },
-  });
+
+  const allManagers = [];
   const employees = [];
-  const roster = [
-    ["Priya Sharma", "priya@ecosphere.io", "FEMALE", ops.id],
-    ["Raj Patel", "raj@ecosphere.io", "MALE", it.id],
-    ["Sneha Iyer", "sneha@ecosphere.io", "FEMALE", hr.id],
-    ["Vikram Rao", "vikram@ecosphere.io", "MALE", fin.id],
-    ["Ananya Das", "ananya@ecosphere.io", "FEMALE", it.id],
-    ["Kabir Khan", "kabir@ecosphere.io", "MALE", ops.id],
-  ];
-  for (const [name, email, gender, departmentId] of roster) {
-    employees.push(
-      await db.user.create({
-        data: { name, email, password: pass("employee123"), role: "EMPLOYEE", gender, departmentId },
-      })
-    );
+
+  for (const dept of [ops, hr, it, fin, mkt, scm, lgl]) {
+    // 3 managers per department
+    for (let mIndex = 1; mIndex <= 3; mIndex++) {
+      let mgr;
+      if (dept.code === "OPS" && mIndex === 1) {
+        mgr = await db.user.create({
+          data: { name: "Meera Manager", email: "manager@ecosphere.io", password: pass("manager123"), role: "MANAGER", gender: "FEMALE", departmentId: dept.id },
+        });
+      } else {
+        const u = generateUser("MANAGER", dept.id, dept.code, mIndex);
+        mgr = await db.user.create({
+          data: { ...u, password: pass("manager123") },
+        });
+      }
+      allManagers.push(mgr);
+    }
+
+    // 12 employees per department
+    for (let eIndex = 1; eIndex <= 12; eIndex++) {
+      const u = generateUser("EMPLOYEE", dept.id, dept.code, eIndex);
+      const emp = await db.user.create({
+        data: { ...u, password: pass("employee123") },
+      });
+      employees.push(emp);
+    }
   }
-  await db.department.update({ where: { id: ops.id }, data: { headId: manager.id } });
-  await db.department.update({ where: { id: it.id }, data: { headId: admin.id } });
+
+  const manager = allManagers.find((m) => m.email === "manager@ecosphere.io");
+
+  // Set heads of departments
+  for (const dept of [ops, hr, it, fin, mkt, scm, lgl]) {
+    if (dept.id === it.id) {
+      await db.department.update({ where: { id: dept.id }, data: { headId: admin.id } });
+    } else {
+      const firstDeptMgr = allManagers.find((m) => m.departmentId === dept.id);
+      if (firstDeptMgr) {
+        await db.department.update({ where: { id: dept.id }, data: { headId: firstDeptMgr.id } });
+      }
+    }
+  }
 
   // ---- Categories ----
   const catTree = await db.category.create({ data: { name: "Tree Plantation", type: "CSR" } });
@@ -347,7 +404,7 @@ async function main() {
   });
   // mark both policies Active and create acknowledgement records for everyone
   await db.esgPolicy.updateMany({ data: { status: "ACTIVE" } });
-  const everyone = [admin, manager, ...employees];
+  const everyone = [admin, ...allManagers, ...employees];
   const ackedCode = new Set([...employees.slice(0, 3), manager, admin].map((u) => u.id));
   const ackedEnv = new Set(employees.slice(0, 2).map((u) => u.id));
   for (const u of everyone) {
