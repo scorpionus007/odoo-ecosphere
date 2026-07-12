@@ -82,8 +82,11 @@ export async function computeScores(): Promise<{ departments: DeptScore[]; overa
     const socialScore = clamp(participationRate * 0.6 + trainingRate * 0.4);
 
     // --- Governance (ack rate − issue penalties) ---
-    const ackRate = policies
-      ? (acks.filter((a) => memberIds.has(a.employeeId)).length / (policies * headcount)) * 100
+    const deptAcks = acks.filter((a) => memberIds.has(a.employeeId));
+    const ackRate = deptAcks.length
+      ? (deptAcks.filter((a) => a.status === "ACKNOWLEDGED").length / deptAcks.length) * 100
+      : policies
+      ? 50
       : 100;
     const deptIssues = issues.filter((i) => i.owner.departmentId === d.id);
     const now = new Date();

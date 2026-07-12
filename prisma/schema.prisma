@@ -34,6 +34,7 @@ model User {
   notifications       Notification[]
   trainings           TrainingRecord[]
   csrCreated          CsrActivity[]         @relation("CsrCreator")
+  complianceOwned     ComplianceAssignment[] @relation("ComplianceOwner")
 }
 
 model Department {
@@ -54,6 +55,8 @@ model Department {
   goals              EnvironmentalGoal[]
   audits             Audit[]
   scores             DepartmentScore[]
+  policies           EsgPolicy[]
+  complianceAssignments ComplianceAssignment[]
 }
 
 // ============ MASTER DATA ============
@@ -111,11 +114,14 @@ model EsgPolicy {
   id            String   @id @default(cuid())
   title         String
   version       String   @default("1.0")
-  category      String   @default("General")
+  category      String   @default("Governance") // Environmental | Social | Governance | General
   content       String
+  documentUrl   String? // uploaded policy document
+  departmentId  String? // null = applies to all departments
+  department    Department? @relation(fields: [departmentId], references: [id])
   effectiveDate DateTime @default(now())
   requiresAck   Boolean  @default(true)
-  status        String   @default("ACTIVE")
+  status        String   @default("DRAFT") // DRAFT | ACTIVE | ARCHIVED
 
   acknowledgements PolicyAcknowledgement[]
 }
@@ -280,14 +286,46 @@ model RewardRedemption {
 // ============ GOVERNANCE (TRANSACTIONAL) ============
 
 model PolicyAcknowledgement {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   policyId       String
   policy         EsgPolicy @relation(fields: [policyId], references: [id])
   employeeId     String
-  employee       User     @relation(fields: [employeeId], references: [id])
-  acknowledgedAt DateTime @default(now())
+  employee       User      @relation(fields: [employeeId], references: [id])
+  status         String    @default("ACKNOWLEDGED") // PENDING | ACKNOWLEDGED
+  acknowledgedAt DateTime?
 
   @@unique([policyId, employeeId])
+}
+
+// ============ COMPLIANCE STANDARDS (ISO 14001 / SEBI BRSR / GRI ...) ============
+
+model ComplianceRequirement {
+  id          String @id @default(cuid())
+  standard    String // ISO_14001 | SEBI_BRSR | GRI | ...
+  code        String // clause/principle e.g. "6.1.2", "P6"
+  title       String
+  description String
+
+  assignments ComplianceAssignment[]
+
+  @@unique([standard, code])
+}
+
+model ComplianceAssignment {
+  id            String   @id @default(cuid())
+  requirementId String
+  requirement   ComplianceRequirement @relation(fields: [requirementId], references: [id])
+  departmentId  String
+  department    Department @relation(fields: [departmentId], references: [id])
+  ownerId       String // responsible manager
+  owner         User     @relation("ComplianceOwner", fields: [ownerId], references: [id])
+  status        String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLIANT
+  dueDate       DateTime?
+  proofUrl      String? // evidence required to close
+  closedAt      DateTime?
+  createdAt     DateTime @default(now())
+
+  @@unique([requirementId, departmentId])
 }
 
 model Audit {

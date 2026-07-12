@@ -177,13 +177,18 @@ export async function redeemReward(formData: FormData) {
       data: { rewardId, userId: user.id, pointsSpent: reward.pointsRequired, voucherCode },
     }),
   ]);
+  // fulfillment instructions by reward type
+  const fulfillment: Record<string, string> = {
+    GIFT_CARD: `Your claim code: ${voucherCode}. A copy has been emailed to your work inbox — it's also saved under My Redemptions.`,
+    MERCH: "A confirmation email has been sent to your work inbox — show it at the company reception to collect your item.",
+    PERK: "HR has been notified — this perk will be added to your account within 2 working days. Confirmation emailed to you.",
+    DONATION: "Thank you! Your donation certificate will be emailed to you once processed.",
+  };
   await notify(
     user.id,
     "GENERAL",
     `Reward redeemed: ${reward.name}`,
-    voucherCode
-      ? `Your claim code: ${voucherCode} — also saved under My Redemptions.`
-      : `${reward.pointsRequired} points deducted from your balance.`,
+    fulfillment[reward.type] ?? `${reward.pointsRequired} points deducted from your balance.`,
     "/quest"
   );
   revalidatePath("/quest");

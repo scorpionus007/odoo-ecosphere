@@ -795,11 +795,11 @@ function QuestChip({ label, tone }: { label: string; tone: "green" | "amber" | "
   );
 }
 const statusTone = (s: string) => (s === "APPROVED" ? "green" : s === "REJECTED" ? "red" : "amber");
-const rewardTypeMeta: Record<string, { icon: string; label: string }> = {
-  GIFT_CARD: { icon: "🎁", label: "Gift card" },
-  PERK: { icon: "🏖️", label: "Perk" },
-  MERCH: { icon: "🎒", label: "Merch" },
-  DONATION: { icon: "🌱", label: "Donation" },
+const rewardTypeMeta: Record<string, { icon: string; label: string; fulfillment: string }> = {
+  GIFT_CARD: { icon: "🎁", label: "Gift card", fulfillment: "Instant claim code — also emailed to your work inbox" },
+  PERK: { icon: "🏖️", label: "Perk", fulfillment: "HR adds it to your account within 2 working days" },
+  MERCH: { icon: "🎒", label: "Merch", fulfillment: "Show your confirmation email at company reception to collect" },
+  DONATION: { icon: "🌱", label: "Donation", fulfillment: "Certificate emailed to you once processed" },
 };
 
 function CopyCode({ code }: { code: string }) {
@@ -1299,7 +1299,8 @@ function StationContent({
                   </div>
                   <QuestChip label={meta.label} tone={r.type === "GIFT_CARD" ? "violet" : "gray"} />
                 </div>
-                <div className="text-xs text-slate-400 mb-2">{r.description}</div>
+                <div className="text-xs text-slate-400 mb-1">{r.description}</div>
+                <div className="text-[10px] text-emerald-400/90 mb-2">📦 {meta.fulfillment}</div>
                 <div className="flex items-center justify-between">
                   <span className="text-amber-300 font-bold text-sm">🪙 {r.pointsRequired}</span>
                   <span className="text-[10px] text-slate-500">{r.stock > 0 ? `${r.stock} left` : "sold out"}</span>

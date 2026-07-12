@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Leaf, Factory, Target, FlaskConical, Package, HeartHandshake,
-  Users, GraduationCap, Scale, FileCheck2, ShieldAlert, ClipboardCheck, Trophy,
-  Gamepad2, FileBarChart2, Settings, Menu, X, Globe2,
+  Users, GraduationCap, Scale, FileCheck2, ShieldAlert, ShieldCheck, ClipboardCheck,
+  Trophy, Gamepad2, FileBarChart2, Settings, Menu, X, Globe2,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -43,7 +43,9 @@ const NAV: Group[] = [
   {
     title: "Governance",
     items: [
-      { href: "/governance/policies", label: "ESG Policies", icon: <Scale size={16} /> },
+      { href: "/governance", label: "Gov. Dashboard", icon: <Scale size={16} /> },
+      { href: "/governance/policies", label: "ESG Policies", icon: <FileCheck2 size={16} /> },
+      { href: "/governance/standards", label: "Compliance Standards", icon: <ShieldCheck size={16} /> },
       { href: "/governance/audits", label: "Audits", icon: <FileCheck2 size={16} /> },
       { href: "/governance/issues", label: "Compliance Issues", icon: <ShieldAlert size={16} /> },
     ],

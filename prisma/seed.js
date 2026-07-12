@@ -295,10 +295,34 @@ async function main() {
   // ---- Rewards ----
   await db.reward.createMany({
     data: [
-      { name: "Reusable Coffee Kit", description: "Bamboo cup + steel straw set", pointsRequired: 150, stock: 20 },
-      { name: "Extra Day Off", description: "One paid sustainability day", pointsRequired: 500, stock: 5 },
-      { name: "Plant a Tree (in your name)", description: "We plant, you track it", pointsRequired: 80, stock: 100 },
-      { name: "EV Charging Credit", description: "₹1000 EV charging voucher", pointsRequired: 300, stock: 10 },
+      { name: "Reusable Coffee Kit", description: "Bamboo cup + steel straw set", type: "MERCH", pointsRequired: 150, stock: 20 },
+      { name: "Extra Day Off", description: "One paid sustainability day", type: "PERK", pointsRequired: 500, stock: 5 },
+      { name: "Plant a Tree (in your name)", description: "We plant, you track it", type: "DONATION", pointsRequired: 80, stock: 100 },
+      { name: "EV Charging Credit", description: "₹1000 EV charging voucher", type: "GIFT_CARD", brand: "ChargeGrid", pointsRequired: 300, stock: 10 },
+      { name: "Amazon Gift Card ₹500", description: "Digital voucher, instant claim code", type: "GIFT_CARD", brand: "Amazon", pointsRequired: 400, stock: 15 },
+      { name: "Starbucks Card ₹300", description: "Coffee on the company — claim code", type: "GIFT_CARD", brand: "Starbucks", pointsRequired: 250, stock: 12 },
+      { name: "Decathlon Voucher ₹1000", description: "Gear up for green commutes", type: "GIFT_CARD", brand: "Decathlon", pointsRequired: 700, stock: 6 },
+    ],
+  });
+
+  // ---- Compliance standards library (ISO 14001 / SEBI BRSR / GRI) ----
+  await db.complianceRequirement.createMany({
+    data: [
+      { standard: "ISO_14001", code: "4.3", title: "Scope of the EMS", description: "Determine boundaries and applicability of the environmental management system." },
+      { standard: "ISO_14001", code: "5.2", title: "Environmental Policy", description: "Top management shall establish, implement and maintain an environmental policy." },
+      { standard: "ISO_14001", code: "6.1.2", title: "Environmental Aspects", description: "Identify environmental aspects of activities, products and services and their impacts." },
+      { standard: "ISO_14001", code: "7.2", title: "Competence & Training", description: "Ensure persons doing work are competent on the basis of education, training or experience." },
+      { standard: "ISO_14001", code: "8.1", title: "Operational Planning & Control", description: "Establish, implement and control processes needed to meet EMS requirements." },
+      { standard: "ISO_14001", code: "9.1", title: "Monitoring & Measurement", description: "Monitor, measure, analyse and evaluate environmental performance." },
+      { standard: "ISO_14001", code: "10.2", title: "Nonconformity & Corrective Action", description: "React to nonconformities, take corrective action and review effectiveness." },
+      { standard: "SEBI_BRSR", code: "P2", title: "Sustainable & Safe Goods", description: "Businesses should provide goods and services in a manner that is sustainable and safe." },
+      { standard: "SEBI_BRSR", code: "P3", title: "Employee Well-being", description: "Businesses should respect and promote the well-being of all employees, including those in their value chains." },
+      { standard: "SEBI_BRSR", code: "P6", title: "Environment Protection", description: "Businesses should respect and make efforts to protect and restore the environment." },
+      { standard: "SEBI_BRSR", code: "P8", title: "Inclusive Growth", description: "Businesses should promote inclusive growth and equitable development." },
+      { standard: "SEBI_BRSR", code: "P9", title: "Consumer Responsibility", description: "Businesses should engage with and provide value to their consumers in a responsible manner." },
+      { standard: "GRI", code: "302", title: "Energy Disclosure", description: "Report energy consumption within the organization and energy intensity." },
+      { standard: "GRI", code: "305", title: "Emissions Disclosure", description: "Report direct (Scope 1), indirect (Scope 2) and other (Scope 3) GHG emissions." },
+      { standard: "GRI", code: "306", title: "Waste Disclosure", description: "Report waste generation, diversion and disposal by composition." },
     ],
   });
 
@@ -321,11 +345,28 @@ async function main() {
         "Teams must segregate waste, prefer virtual meetings over travel, and procure from approved sustainable vendors.",
     },
   });
-  for (const emp of [...employees.slice(0, 3), manager, admin]) {
-    await db.policyAcknowledgement.create({ data: { policyId: codePolicy.id, employeeId: emp.id } });
-  }
-  for (const emp of employees.slice(0, 2)) {
-    await db.policyAcknowledgement.create({ data: { policyId: envPolicy.id, employeeId: emp.id } });
+  // mark both policies Active and create acknowledgement records for everyone
+  await db.esgPolicy.updateMany({ data: { status: "ACTIVE" } });
+  const everyone = [admin, manager, ...employees];
+  const ackedCode = new Set([...employees.slice(0, 3), manager, admin].map((u) => u.id));
+  const ackedEnv = new Set(employees.slice(0, 2).map((u) => u.id));
+  for (const u of everyone) {
+    await db.policyAcknowledgement.create({
+      data: {
+        policyId: codePolicy.id,
+        employeeId: u.id,
+        status: ackedCode.has(u.id) ? "ACKNOWLEDGED" : "PENDING",
+        acknowledgedAt: ackedCode.has(u.id) ? new Date() : null,
+      },
+    });
+    await db.policyAcknowledgement.create({
+      data: {
+        policyId: envPolicy.id,
+        employeeId: u.id,
+        status: ackedEnv.has(u.id) ? "ACKNOWLEDGED" : "PENDING",
+        acknowledgedAt: ackedEnv.has(u.id) ? new Date() : null,
+      },
+    });
   }
 
   // ---- Audits + compliance issues ----
